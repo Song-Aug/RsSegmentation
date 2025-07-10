@@ -54,13 +54,22 @@ class Generate_Flowfield(nn.Module):
         out_h, out_w = size
         n, c, h, w = input.size()
 
+        # 添加数值稳定性检查
+        if torch.isnan(flow).any() or torch.isinf(flow).any():
+            print("警告：flow中包含NaN或Inf值，进行修正")
+            flow = torch.nan_to_num(flow, nan=0.0, posinf=1.0, neginf=-1.0)
+
         norm = torch.tensor([[[[out_w, out_h]]]]).type_as(input).to(input.device)
-        h_grid = torch.linspace(-1.0, 1.0, out_h).view(-1, 1).repeat(1, out_w)  # [out_h, 1] -> [out_h, out_w]
-        w_gird = torch.linspace(-1.0, 1.0, out_w).repeat(out_h, 1)  # [1, out_w] -> [out_w, out_h]
-        grid = torch.cat((w_gird.unsqueeze(2), h_grid.unsqueeze(2)), 2)  # [out_w, out_h, 2]
+        h_grid = torch.linspace(-1.0, 1.0, out_h).view(-1, 1).repeat(1, out_w)
+        w_gird = torch.linspace(-1.0, 1.0, out_w).repeat(out_h, 1)
+        grid = torch.cat((w_gird.unsqueeze(2), h_grid.unsqueeze(2)), 2)
 
         grid = grid.repeat(n, 1, 1, 1).type_as(input).to(input.device)
         grid = grid + flow.permute(0, 2, 3, 1) / norm
+        
+        # 确保grid在有效范围内
+        grid = torch.clamp(grid, -1.0, 1.0)
+        
         return grid
 
 
@@ -91,8 +100,17 @@ class FusionModule(nn.Module):
         seg_mid_out = self.seg_mid_out(seg_mid)
         seg_edge_out = self.edge_out(seg_edge)
 
-        seg_map = 1 * (torch.sigmoid(seg_mid_out).detach()).float()
-        edge_map = 1 * (torch.sigmoid(seg_edge_out).detach()).float()
+        # 添加数值稳定性检查
+        seg_mid_out = torch.clamp(seg_mid_out, -10.0, 10.0)
+        seg_edge_out = torch.clamp(seg_edge_out, -10.0, 10.0)
+
+        seg_map = torch.sigmoid(seg_mid_out).detach()
+        edge_map = torch.sigmoid(seg_edge_out).detach()
+        
+        # 防止数值下溢
+        seg_map = torch.clamp(seg_map, 1e-6, 1.0 - 1e-6)
+        edge_map = torch.clamp(edge_map, 1e-6, 1.0 - 1e-6)
+        
         seg_out = seg_edge * edge_map * (1 - seg_map) + seg_mid * seg_map * (1 - edge_map)
         seg_out = self.seg_out(seg_out)
 
@@ -100,7 +118,8 @@ class FusionModule(nn.Module):
 
     def Decouple_seg(self, input, grid):
         """解耦分割，分为主体和边缘"""
-        seg_body = F.grid_sample(input, grid)
+        # 使用 align_corners=True 来避免警告
+        seg_body = F.grid_sample(input, grid, align_corners=True)
         seg_edge = input - seg_body
         return seg_body, seg_edge
 
@@ -482,7 +501,7 @@ class HighResolutionDecoupledNet(nn.Module):
         
         # 最终输出层
         self.final_layer_seg = nn.Conv2d(6 * num_classes, num_classes, 1, 1)
-        self.final_layer_bd = nn.Conv2d(6 * num_classes, num_classes, 1, 1)
+        self.final_layer_bd = nn.Conv2d(6, num_classes, 1, 1)  # 边界输出固定为6个1通道的输出
 
     def forward(self, x):
         # Stem

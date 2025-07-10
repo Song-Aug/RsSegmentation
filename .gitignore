@@ -3,4 +3,10 @@
 /checkpoints
 /pretrained_weights
 /swanlog
+
 **/nohup.out
+
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
