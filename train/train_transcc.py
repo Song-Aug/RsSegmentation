@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -212,7 +214,7 @@ def main():
         'image_size': 512,
         'input_channels': 3,  # RGB + NIR
         'use_nir': False,
-        'num_epochs': 120,
+        'num_epochs': 200,
         'learning_rate': 0.001,
         'weight_decay': 1e-4,
         'save_dir': './runs',

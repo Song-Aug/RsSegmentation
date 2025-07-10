@@ -396,9 +396,9 @@ class HighResolutionDecoupledNet(nn.Module):
     
     参数：
         base_channel (int): 基础通道数（默认：48）
-        num_classes (int): 输出类别数（默认：1，用于二分类分割）
+        num_classes (int): 输出类别数（默认：2，用于二分类分割，背景和前景）
     """
-    def __init__(self, base_channel: int = 48, num_classes: int = 1):
+    def __init__(self, base_channel: int = 48, num_classes: int = 2):
         super().__init__()
         # Stem 网络
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)  # 512×512×64
@@ -558,7 +558,7 @@ class HDNet(HighResolutionDecoupledNet):
     pass
 
 
-def create_hdnet(base_channel=48, num_classes=1, device='cuda'):
+def create_hdnet(base_channel=48, num_classes=2, device='cuda'):
     """创建并初始化 HDNet 模型"""
     model = HDNet(base_channel=base_channel, num_classes=num_classes)
     if device == 'cuda' and torch.cuda.is_available():
@@ -571,7 +571,7 @@ def create_hdnet(base_channel=48, num_classes=1, device='cuda'):
 # 使用示例
 if __name__ == "__main__":
     # 创建模型
-    model = create_hdnet(base_channel=48, num_classes=1)
+    model = create_hdnet(base_channel=48, num_classes=2)
     
     # 打印模型信息
     print("HDNet 模型创建成功!")

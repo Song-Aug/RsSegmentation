@@ -3,4 +3,4 @@
 /checkpoints
 /pretrained_weights
 /swanlog
-**/nohup.out
+nohup.out
