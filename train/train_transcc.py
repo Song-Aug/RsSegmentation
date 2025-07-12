@@ -121,6 +121,133 @@ def save_checkpoint(model, optimizer, epoch, best_iou, save_path):
     torch.save(checkpoint, save_path)
 
 
+def load_pretrained_weights(model, pretrained_path):
+    """
+    加载ViT预训练权重到TransCC模型的编码器部分
+    
+    Args:
+        model: TransCC模型
+        pretrained_path: 预训练权重文件路径
+    """
+    if not os.path.exists(pretrained_path):
+        print(f"警告: 预训练权重文件不存在: {pretrained_path}")
+        return model
+    
+    print(f"正在加载预训练权重: {pretrained_path}")
+    
+    try:
+        # 加载预训练权重
+        pretrained_dict = torch.load(pretrained_path, map_location='cpu')
+        
+        # 如果预训练权重是完整的检查点，提取state_dict
+        if 'model' in pretrained_dict:
+            pretrained_dict = pretrained_dict['model']
+        elif 'state_dict' in pretrained_dict:
+            pretrained_dict = pretrained_dict['state_dict']
+        
+        print(f"预训练权重包含 {len(pretrained_dict)} 个键")
+        print("预训练权重的前几个键:")
+        for i, key in enumerate(list(pretrained_dict.keys())[:10]):
+            print(f"  {i+1}. {key}: {pretrained_dict[key].shape}")
+        
+        # 获取模型的state_dict
+        model_dict = model.state_dict()
+        
+        # 创建匹配的权重字典
+        matched_dict = {}
+        unmatched_keys = []
+        
+        # 尝试直接匹配（如果键名完全一致）
+        direct_matched = 0
+        for key in pretrained_dict:
+            target_key = f"encoder.{key}"
+            if target_key in model_dict:
+                if pretrained_dict[key].shape == model_dict[target_key].shape:
+                    matched_dict[target_key] = pretrained_dict[key]
+                    direct_matched += 1
+                else:
+                    print(f"✗ 形状不匹配: {key} {pretrained_dict[key].shape} vs {target_key} {model_dict[target_key].shape}")
+        
+        if direct_matched > 0:
+            print(f"✓ 直接匹配成功: {direct_matched} 个权重")
+        else:
+            print("直接匹配失败，尝试手动映射...")
+            
+            # 映射规则：ViT权重 -> TransCC编码器权重
+            key_mapping = {
+                'patch_embed.proj.weight': 'encoder.patch_embed.proj.weight',
+                'patch_embed.proj.bias': 'encoder.patch_embed.proj.bias',
+                'pos_embed': 'encoder.pos_embed',
+                'cls_token': 'encoder.cls_token',
+            }
+            
+            # 添加transformer blocks的映射
+            for i in range(12):  # ViT-Base有12层
+                key_mapping.update({
+                    f'blocks.{i}.norm1.weight': f'encoder.blocks.{i}.norm1.weight',
+                    f'blocks.{i}.norm1.bias': f'encoder.blocks.{i}.norm1.bias',
+                    f'blocks.{i}.attn.qkv.weight': f'encoder.blocks.{i}.attn.qkv.weight',
+                    f'blocks.{i}.attn.qkv.bias': f'encoder.blocks.{i}.attn.qkv.bias',
+                    f'blocks.{i}.attn.proj.weight': f'encoder.blocks.{i}.attn.proj.weight',
+                    f'blocks.{i}.attn.proj.bias': f'encoder.blocks.{i}.attn.proj.bias',
+                    f'blocks.{i}.norm2.weight': f'encoder.blocks.{i}.norm2.weight',
+                    f'blocks.{i}.norm2.bias': f'encoder.blocks.{i}.norm2.bias',
+                    f'blocks.{i}.mlp.fc1.weight': f'encoder.blocks.{i}.mlp.fc1.weight',
+                    f'blocks.{i}.mlp.fc1.bias': f'encoder.blocks.{i}.mlp.fc1.bias',
+                    f'blocks.{i}.mlp.fc2.weight': f'encoder.blocks.{i}.mlp.fc2.weight',
+                    f'blocks.{i}.mlp.fc2.bias': f'encoder.blocks.{i}.mlp.fc2.bias',
+                })
+            
+            # 添加最终norm层
+            key_mapping.update({
+                'norm.weight': 'encoder.norm.weight',
+                'norm.bias': 'encoder.norm.bias',
+            })
+            
+            # 匹配权重
+            for pretrained_key, model_key in key_mapping.items():
+                if pretrained_key in pretrained_dict and model_key in model_dict:
+                    pretrained_weight = pretrained_dict[pretrained_key]
+                    model_weight = model_dict[model_key]
+                    
+                    # 检查形状是否匹配
+                    if pretrained_weight.shape == model_weight.shape:
+                        matched_dict[model_key] = pretrained_weight
+                        print(f"✓ 匹配: {pretrained_key} -> {model_key} {pretrained_weight.shape}")
+                    else:
+                        print(f"✗ 形状不匹配: {pretrained_key} {pretrained_weight.shape} vs {model_key} {model_weight.shape}")
+                        unmatched_keys.append(f"{pretrained_key} (形状不匹配)")
+                else:
+                    if pretrained_key not in pretrained_dict:
+                        unmatched_keys.append(f"{pretrained_key} (预训练权重中不存在)")
+                    if model_key not in model_dict:
+                        unmatched_keys.append(f"{model_key} (模型中不存在)")
+        
+        # 加载匹配的权重
+        if matched_dict:
+            model_dict.update(matched_dict)
+            model.load_state_dict(model_dict)
+            print(f"✓ 成功加载 {len(matched_dict)} 个预训练权重")
+        else:
+            print("警告: 没有找到匹配的预训练权重")
+        
+        # 打印未匹配的键
+        if unmatched_keys:
+            print(f"未匹配的键 ({len(unmatched_keys)} 个):")
+            for key in unmatched_keys[:5]:  # 只显示前5个
+                print(f"  - {key}")
+            if len(unmatched_keys) > 5:
+                print(f"  ... 还有 {len(unmatched_keys) - 5} 个未匹配的键")
+        
+        print("✓ 预训练权重加载完成")
+        
+    except Exception as e:
+        print(f"加载预训练权重时出错: {e}")
+        print("继续使用随机初始化权重")
+    
+    return model
+
+
 def create_sample_images(model, val_loader, device, epoch, num_samples=4):
     """创建样本预测图像用于SwanLab可视化"""
     model.eval()
@@ -218,7 +345,7 @@ def main():
         'learning_rate': 0.001,
         'weight_decay': 1e-4,
         'save_dir': './runs',
-        'model_name': 'unetformer_3bands',
+        'model_name': 'TransCC',
         # 'backbone': 'efficientnet_b0',
         # 'pretrained': False,
         'num_classes': 2,
@@ -226,12 +353,13 @@ def main():
     }
     
     # 初始化SwanLab实验看板
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
+    # experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
+    experiment_name = f"{config['model_name']}"
     swanlab.init(
         project="Building-Segmentation-3Bands",
         experiment_name=experiment_name,
         config=config,
-        description="3波段建筑物分割实验 - UNetFormer模型",
+        description="3波段建筑物分割实验",
         tags=["UNetFormer", "building-segmentation", "RGB"],
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
@@ -265,6 +393,11 @@ def main():
             in_chans=config['input_channels'],
             num_classes=config['num_classes']
         )
+        
+        # 加载预训练权重
+        # pretrained_path = './pretrained_weights/vit_base_patch16_224.pth'
+        # model = load_pretrained_weights(model, pretrained_path)
+        
         model = model.to(device)
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
