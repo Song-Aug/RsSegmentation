@@ -176,7 +176,7 @@ class BuildingSegmentationDataset(Dataset):
                 label = self.process_label(label)  # 重新处理调整后的标签
             
             # # 数据增强
-            # image, label = self.apply_augmentation(image, label)
+            image, label = self.apply_augmentation(image, label)
             
             # 应用变换
             if self.transform is not None:

@@ -17,6 +17,12 @@ from models.TransCC import TransCC
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
 
+from swanlab.plugin.notification import LarkCallback
+lark_callback = LarkCallback(
+    webhook_url="https://open.feishu.cn/open-apis/bot/v2/hook/5cd99837-5be3-4438-975f-89697bb5250c",
+    secret="wzn4LqIgfwN4TRk2Mecc1b"
+)
+
 def train_one_epoch(model, train_loader, criterion, optimizer, device, metrics, epoch):
     model.train()
     total_loss = 0
@@ -121,19 +127,21 @@ def save_checkpoint(model, optimizer, epoch, best_iou, save_path):
     torch.save(checkpoint, save_path)
 
 
-def load_pretrained_weights(model, pretrained_path):
+def load_pretrained_weights(model, pretrained_path, fusion_strategy='interpolate'):
     """
     加载ViT预训练权重到TransCC模型的编码器部分
     
     Args:
         model: TransCC模型
         pretrained_path: 预训练权重文件路径
+        fusion_strategy: 权重融合策略 ('direct', 'interpolate', 'average_pairs', 'skip')
     """
     if not os.path.exists(pretrained_path):
         print(f"警告: 预训练权重文件不存在: {pretrained_path}")
         return model
     
     print(f"正在加载预训练权重: {pretrained_path}")
+    print(f"使用融合策略: {fusion_strategy}")
     
     try:
         # 加载预训练权重
@@ -146,44 +154,57 @@ def load_pretrained_weights(model, pretrained_path):
             pretrained_dict = pretrained_dict['state_dict']
         
         print(f"预训练权重包含 {len(pretrained_dict)} 个键")
-        print("预训练权重的前几个键:")
-        for i, key in enumerate(list(pretrained_dict.keys())[:10]):
-            print(f"  {i+1}. {key}: {pretrained_dict[key].shape}")
         
         # 获取模型的state_dict
         model_dict = model.state_dict()
+        
+        # 自动检测模型的transformer层数
+        model_layers = 0
+        for key in model_dict.keys():
+            if 'encoder.blocks.' in key:
+                layer_num = int(key.split('.')[2]) + 1
+                model_layers = max(model_layers, layer_num)
+        
+        print(f"检测到TransCC模型有 {model_layers} 层transformer blocks")
+        
+        # 检测预训练模型的层数
+        pretrained_layers = 0
+        for key in pretrained_dict.keys():
+            if 'blocks.' in key:
+                layer_num = int(key.split('.')[1]) + 1
+                pretrained_layers = max(pretrained_layers, layer_num)
+        
+        print(f"检测到预训练模型有 {pretrained_layers} 层transformer blocks")
         
         # 创建匹配的权重字典
         matched_dict = {}
         unmatched_keys = []
         
-        # 尝试直接匹配（如果键名完全一致）
-        direct_matched = 0
-        for key in pretrained_dict:
-            target_key = f"encoder.{key}"
-            if target_key in model_dict:
-                if pretrained_dict[key].shape == model_dict[target_key].shape:
-                    matched_dict[target_key] = pretrained_dict[key]
-                    direct_matched += 1
-                else:
-                    print(f"✗ 形状不匹配: {key} {pretrained_dict[key].shape} vs {target_key} {model_dict[target_key].shape}")
+        # 首先加载非transformer层的权重（patch_embed, pos_embed, cls_token, norm）
+        basic_mapping = {
+            'patch_embed.proj.weight': 'encoder.patch_embed.proj.weight',
+            'patch_embed.proj.bias': 'encoder.patch_embed.proj.bias',
+            'pos_embed': 'encoder.pos_embed',
+            'cls_token': 'encoder.cls_token',
+            'norm.weight': 'encoder.norm.weight',
+            'norm.bias': 'encoder.norm.bias',
+        }
         
-        if direct_matched > 0:
-            print(f"✓ 直接匹配成功: {direct_matched} 个权重")
-        else:
-            print("直接匹配失败，尝试手动映射...")
-            
-            # 映射规则：ViT权重 -> TransCC编码器权重
-            key_mapping = {
-                'patch_embed.proj.weight': 'encoder.patch_embed.proj.weight',
-                'patch_embed.proj.bias': 'encoder.patch_embed.proj.bias',
-                'pos_embed': 'encoder.pos_embed',
-                'cls_token': 'encoder.cls_token',
-            }
-            
-            # 添加transformer blocks的映射
-            for i in range(12):  # ViT-Base有12层
-                key_mapping.update({
+        for pretrained_key, model_key in basic_mapping.items():
+            if pretrained_key in pretrained_dict and model_key in model_dict:
+                pretrained_weight = pretrained_dict[pretrained_key]
+                model_weight = model_dict[model_key]
+                
+                if pretrained_weight.shape == model_weight.shape:
+                    matched_dict[model_key] = pretrained_weight
+                    print(f"✓ 基础组件匹配: {pretrained_key} -> {model_key}")
+        
+        # 根据融合策略处理transformer层
+        if fusion_strategy == 'direct':
+            # 策略1: 直接加载前N层
+            print(f"使用直接加载策略：加载前{model_layers}层")
+            for i in range(model_layers):
+                layer_mapping = {
                     f'blocks.{i}.norm1.weight': f'encoder.blocks.{i}.norm1.weight',
                     f'blocks.{i}.norm1.bias': f'encoder.blocks.{i}.norm1.bias',
                     f'blocks.{i}.attn.qkv.weight': f'encoder.blocks.{i}.attn.qkv.weight',
@@ -196,32 +217,99 @@ def load_pretrained_weights(model, pretrained_path):
                     f'blocks.{i}.mlp.fc1.bias': f'encoder.blocks.{i}.mlp.fc1.bias',
                     f'blocks.{i}.mlp.fc2.weight': f'encoder.blocks.{i}.mlp.fc2.weight',
                     f'blocks.{i}.mlp.fc2.bias': f'encoder.blocks.{i}.mlp.fc2.bias',
-                })
-            
-            # 添加最终norm层
-            key_mapping.update({
-                'norm.weight': 'encoder.norm.weight',
-                'norm.bias': 'encoder.norm.bias',
-            })
-            
-            # 匹配权重
-            for pretrained_key, model_key in key_mapping.items():
-                if pretrained_key in pretrained_dict and model_key in model_dict:
-                    pretrained_weight = pretrained_dict[pretrained_key]
-                    model_weight = model_dict[model_key]
+                }
+                
+                for pretrained_key, model_key in layer_mapping.items():
+                    if pretrained_key in pretrained_dict and model_key in model_dict:
+                        matched_dict[model_key] = pretrained_dict[pretrained_key]
+        
+        elif fusion_strategy == 'skip':
+            # 策略2: 隔层采样 (0,2,4,6,8,10) -> (0,1,2,3,4,5)
+            print(f"使用隔层采样策略：从12层中采样到{model_layers}层")
+            skip_ratio = pretrained_layers // model_layers
+            for i in range(model_layers):
+                src_layer = i * skip_ratio
+                if src_layer < pretrained_layers:
+                    layer_mapping = {
+                        f'blocks.{src_layer}.norm1.weight': f'encoder.blocks.{i}.norm1.weight',
+                        f'blocks.{src_layer}.norm1.bias': f'encoder.blocks.{i}.norm1.bias',
+                        f'blocks.{src_layer}.attn.qkv.weight': f'encoder.blocks.{i}.attn.qkv.weight',
+                        f'blocks.{src_layer}.attn.qkv.bias': f'encoder.blocks.{i}.attn.qkv.bias',
+                        f'blocks.{src_layer}.attn.proj.weight': f'encoder.blocks.{i}.attn.proj.weight',
+                        f'blocks.{src_layer}.attn.proj.bias': f'encoder.blocks.{i}.attn.proj.bias',
+                        f'blocks.{src_layer}.norm2.weight': f'encoder.blocks.{i}.norm2.weight',
+                        f'blocks.{src_layer}.norm2.bias': f'encoder.blocks.{i}.norm2.bias',
+                        f'blocks.{src_layer}.mlp.fc1.weight': f'encoder.blocks.{i}.mlp.fc1.weight',
+                        f'blocks.{src_layer}.mlp.fc1.bias': f'encoder.blocks.{i}.mlp.fc1.bias',
+                        f'blocks.{src_layer}.mlp.fc2.weight': f'encoder.blocks.{i}.mlp.fc2.weight',
+                        f'blocks.{src_layer}.mlp.fc2.bias': f'encoder.blocks.{i}.mlp.fc2.bias',
+                    }
                     
-                    # 检查形状是否匹配
-                    if pretrained_weight.shape == model_weight.shape:
-                        matched_dict[model_key] = pretrained_weight
-                        print(f"✓ 匹配: {pretrained_key} -> {model_key} {pretrained_weight.shape}")
-                    else:
-                        print(f"✗ 形状不匹配: {pretrained_key} {pretrained_weight.shape} vs {model_key} {model_weight.shape}")
-                        unmatched_keys.append(f"{pretrained_key} (形状不匹配)")
-                else:
-                    if pretrained_key not in pretrained_dict:
-                        unmatched_keys.append(f"{pretrained_key} (预训练权重中不存在)")
-                    if model_key not in model_dict:
-                        unmatched_keys.append(f"{model_key} (模型中不存在)")
+                    for pretrained_key, model_key in layer_mapping.items():
+                        if pretrained_key in pretrained_dict and model_key in model_dict:
+                            matched_dict[model_key] = pretrained_dict[pretrained_key]
+                            print(f"✓ 隔层映射: layer{src_layer} -> layer{i}")
+        
+        elif fusion_strategy == 'average_pairs':
+            # 策略3: 相邻层平均 (0+1)/2 -> 0, (2+3)/2 -> 1, ...
+            print(f"使用相邻层平均策略：将12层合并为{model_layers}层")
+            for i in range(model_layers):
+                src_layer1 = i * 2
+                src_layer2 = i * 2 + 1
+                
+                if src_layer1 < pretrained_layers and src_layer2 < pretrained_layers:
+                    layer_params = [
+                        'norm1.weight', 'norm1.bias', 'attn.qkv.weight', 'attn.qkv.bias',
+                        'attn.proj.weight', 'attn.proj.bias', 'norm2.weight', 'norm2.bias',
+                        'mlp.fc1.weight', 'mlp.fc1.bias', 'mlp.fc2.weight', 'mlp.fc2.bias'
+                    ]
+                    
+                    for param in layer_params:
+                        key1 = f'blocks.{src_layer1}.{param}'
+                        key2 = f'blocks.{src_layer2}.{param}'
+                        target_key = f'encoder.blocks.{i}.{param}'
+                        
+                        if key1 in pretrained_dict and key2 in pretrained_dict and target_key in model_dict:
+                            # 平均两层的权重
+                            averaged_weight = (pretrained_dict[key1] + pretrained_dict[key2]) / 2.0
+                            matched_dict[target_key] = averaged_weight
+                    
+                    print(f"✓ 平均融合: layer{src_layer1}+layer{src_layer2} -> layer{i}")
+        
+        elif fusion_strategy == 'interpolate':
+            # 策略4: 线性插值
+            print(f"使用线性插值策略：将{pretrained_layers}层插值为{model_layers}层")
+            
+            # 为每个目标层计算对应的源层索引（浮点数）
+            for i in range(model_layers):
+                # 计算在源层中的位置
+                src_pos = i * (pretrained_layers - 1) / (model_layers - 1) if model_layers > 1 else 0
+                src_layer_low = int(src_pos)
+                src_layer_high = min(src_layer_low + 1, pretrained_layers - 1)
+                weight_high = src_pos - src_layer_low
+                weight_low = 1.0 - weight_high
+                
+                layer_params = [
+                    'norm1.weight', 'norm1.bias', 'attn.qkv.weight', 'attn.qkv.bias',
+                    'attn.proj.weight', 'attn.proj.bias', 'norm2.weight', 'norm2.bias',
+                    'mlp.fc1.weight', 'mlp.fc1.bias', 'mlp.fc2.weight', 'mlp.fc2.bias'
+                ]
+                
+                for param in layer_params:
+                    key_low = f'blocks.{src_layer_low}.{param}'
+                    key_high = f'blocks.{src_layer_high}.{param}'
+                    target_key = f'encoder.blocks.{i}.{param}'
+                    
+                    if key_low in pretrained_dict and key_high in pretrained_dict and target_key in model_dict:
+                        # 线性插值
+                        if src_layer_low == src_layer_high:
+                            interpolated_weight = pretrained_dict[key_low]
+                        else:
+                            interpolated_weight = (weight_low * pretrained_dict[key_low] + 
+                                                 weight_high * pretrained_dict[key_high])
+                        matched_dict[target_key] = interpolated_weight
+                
+                print(f"✓ 插值映射: layer{src_pos:.1f} -> layer{i}")
         
         # 加载匹配的权重
         if matched_dict:
@@ -230,14 +318,6 @@ def load_pretrained_weights(model, pretrained_path):
             print(f"✓ 成功加载 {len(matched_dict)} 个预训练权重")
         else:
             print("警告: 没有找到匹配的预训练权重")
-        
-        # 打印未匹配的键
-        if unmatched_keys:
-            print(f"未匹配的键 ({len(unmatched_keys)} 个):")
-            for key in unmatched_keys[:5]:  # 只显示前5个
-                print(f"  - {key}")
-            if len(unmatched_keys) > 5:
-                print(f"  ... 还有 {len(unmatched_keys) - 5} 个未匹配的键")
         
         print("✓ 预训练权重加载完成")
         
@@ -354,14 +434,15 @@ def main():
     
     # 初始化SwanLab实验看板
     # experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
-    experiment_name = f"{config['model_name']}"
+    experiment_name = f"{config['model_name']}_loadpretrain"
     swanlab.init(
         project="Building-Segmentation-3Bands",
         experiment_name=experiment_name,
         config=config,
         description="3波段建筑物分割实验",
         tags=["UNetFormer", "building-segmentation", "RGB"],
-        device='cuda' if torch.cuda.is_available() else 'cpu'
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        callbacks=[lark_callback]
     )
     
     # 设置设备
@@ -395,8 +476,9 @@ def main():
         )
         
         # 加载预训练权重
-        # pretrained_path = './pretrained_weights/vit_base_patch16_224.pth'
-        # model = load_pretrained_weights(model, pretrained_path)
+        pretrained_path = './pretrained_weights/vit_base_patch16_224.pth'
+        # 可选的融合策略: 'direct', 'interpolate', 'average_pairs', 'skip'
+        model = load_pretrained_weights(model, pretrained_path, fusion_strategy='interpolate')
         
         model = model.to(device)
         total_params = sum(p.numel() for p in model.parameters())
@@ -425,6 +507,9 @@ def main():
         best_iou = 0
         best_epoch = 0
         
+        lark_callback.send_msg(
+            content=f"{experiment_name} - 训练开始",  # 通知内容
+        )
         for epoch in range(config['num_epochs']):       
             # 记录学习率到SwanLab
             swanlab.log({
@@ -476,6 +561,11 @@ def main():
                 best_epoch = epoch + 1
                 best_model_path = os.path.join(f'./checkpoints/{experiment_name}/', 'best_model.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
+                if val_result['iou'] > 0.7:
+                    lark_callback.send_msg(
+                        content=f"Current IoU: {val_result['iou']}, New best model is saved",  # 通知内容
+                    )
+            
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(f'./checkpoints/{experiment_name}', f'checkpoint_epoch_{epoch+1}.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
