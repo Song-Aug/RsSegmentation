@@ -4,16 +4,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 import swanlab
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from io import BytesIO
-import PIL.Image
 
 from models.TransCC import TransCC
+from models.TransCC_V2 import create_transcc_model
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
 
@@ -470,10 +470,11 @@ def main():
         })
 
         # 创建模型并记录模型信息
-        model = TransCC(
-            in_chans=config['input_channels'],
-            num_classes=config['num_classes']
-        )
+        # model = TransCC(
+        #     in_chans=config['input_channels'],
+        #     num_classes=config['num_classes']
+        # )
+        model = create_transcc_model({'patch_size':16, 'num_classes':2})
         
         # 加载预训练权重
         pretrained_path = './pretrained_weights/vit_base_patch16_224.pth'
@@ -496,7 +497,28 @@ def main():
             lr=config['learning_rate'],
             weight_decay=config['weight_decay']
         )
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['num_epochs'])
+
+        # Warm-up阶段
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=5
+        )
+        # 主调度器
+        main_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=20,          # 第一个重启周期
+            T_mult=2,        # 周期倍增因子
+            eta_min=1e-6,    # 最小学习率
+            last_epoch=-1
+        )
+        # 组合调度器
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[5]
+        )
         
         # 定义指标计算类
         train_metrics = SegmentationMetrics(config['num_classes'])
@@ -527,7 +549,7 @@ def main():
             )
             
             # 更新学习率
-            scheduler.step()
+            scheduler.step(val_result['iou'])
             
             # 记录训练和验证指标到SwanLab
             swanlab.log({
