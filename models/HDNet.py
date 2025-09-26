@@ -501,7 +501,7 @@ class HighResolutionDecoupledNet(nn.Module):
         
         # 最终输出层
         self.final_layer_seg = nn.Conv2d(6 * num_classes, num_classes, 1, 1)
-        self.final_layer_bd = nn.Conv2d(6, num_classes, 1, 1)  # 边界输出固定为6个1通道的输出
+        self.final_layer_bd = nn.Conv2d(6, 1, 1, 1)  # 边界输出固定为1通道
 
     def forward(self, x):
         # Stem

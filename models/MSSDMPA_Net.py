@@ -91,18 +91,18 @@ class attn_pool(nn.Module):
 
 # DPMG Module (Deep Pyramid Multi-path Guidance)（深度金字塔多路径引导模块）
 class dsup(nn.Module):
-    def __init__(self, input_channels):
+    def __init__(self, input_channels, num_classes=2):
         super(dsup, self).__init__()
         self.conv1 = conv3x3(input_channels, input_channels // 2)
         self.bn1 = nn.BatchNorm2d(input_channels // 2)
         self.conv2 = conv3x3(input_channels // 2, 32)
-        self.conv3 = nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(32, num_classes, kernel_size=3, stride=1, padding=1)
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.conv2(x)
         x = self.conv3(x)
-        return torch.sigmoid(x)
+        return x
 
 
 # Dilated Convolutional Block（空洞卷积块）
@@ -165,21 +165,21 @@ class kqcbam(nn.Module):
 
 # Decoder Module（解码器模块）
 class decoder(nn.Module):
-    def __init__(self, input_channels):
+    def __init__(self, input_channels, num_classes=2):
         super(decoder, self).__init__()
         self.conv1 = nn.ConvTranspose2d(input_channels, 128, kernel_size=4, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(128)
         self.conv2 = nn.Conv2d(128, 64, 3, stride=1, padding=1)
         self.bn2 = nn.BatchNorm2d(64)
         self.conv3 = nn.Conv2d(64, 32, 3, stride=1, padding=1)
-        self.conv_out = nn.Conv2d(32, 1, 3, stride=1, padding=1)
+        self.conv_out = nn.Conv2d(32, num_classes, 3, stride=1, padding=1)
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.conv3(x)
         x = self.conv_out(x)
-        return torch.sigmoid(x)
+        return x
 
 
 # MSSDMPA-Net Main Architecture（MSSDMPA-Net 主架构）
@@ -190,9 +190,9 @@ class MSSDMPA_Net(nn.Module):
     
     参数：
         input_channels (int): 输入通道数（默认：3，用于RGB图像）
-        num_classes (int): 输出类别数（默认：1，用于二分类分割）
+        num_classes (int): 输出类别数（默认：2，用于二分类分割）
     """
-    def __init__(self, input_channels=3, num_classes=1):
+    def __init__(self, input_channels=3, num_classes=2):
         super(MSSDMPA_Net, self).__init__()
         self.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3)
         self.bn1 = nn.BatchNorm2d(64)
@@ -211,7 +211,13 @@ class MSSDMPA_Net(nn.Module):
         self.cbm3 = kqcbam(256, 4)
         self.cbm4 = kqcbam(512, 8)
 
-        self.decoder = decoder(960)
+        self.decoder = decoder(960, num_classes=num_classes)
+
+        # 更新dsup模块以接受num_classes
+        self.path1.dp_sup = dsup(64, num_classes=num_classes)
+        self.path2.dp_sup = dsup(128, num_classes=num_classes)
+        self.path3.dp_sup = dsup(256, num_classes=num_classes)
+        self.path4.dp_sup = dsup(512, num_classes=num_classes)
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))

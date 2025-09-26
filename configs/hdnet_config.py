@@ -13,6 +13,6 @@ config = {
     'save_dir': './runs',
     'model_name': 'hdnet_3bands',
     'base_channel': 48,
-    'num_classes': 1,
+    'num_classes': 2,
     'seed': 42
 }
