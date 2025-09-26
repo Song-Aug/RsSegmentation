@@ -7,21 +7,225 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 import numpy as np
 from datetime import datetime
-from tqdm import tqdm
 import swanlab
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
-from models.TransCC import TransCC
 from models.TransCC_V2 import create_transcc_model
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
+from configs.transcc_config import config
+from utils.trainer import train_one_epoch, validate, test
+from utils.weights import load_pretrained_weights
+from utils.visualization import create_sample_images
+from utils.checkpoint import save_checkpoint
 
 from swanlab.plugin.notification import LarkCallback
 lark_callback = LarkCallback(
     webhook_url="https://open.feishu.cn/open-apis/bot/v2/hook/5cd99837-5be3-4438-975f-89697bb5250c",
     secret="wzn4LqIgfwN4TRk2Mecc1b"
 )
+
+def main():
+    seed = config['seed']
+    import random
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    
+    # 初始化SwanLab实验看板
+    # experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
+    experiment_name = f"{config['model_name']}_loadpretrain"
+    swanlab.init(
+        project="Building-Segmentation-3Bands",
+        experiment_name=experiment_name,
+        config=config,
+        description="3波段建筑物分割实验",
+        tags=["UNetFormer", "building-segmentation", "RGB"],
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        callbacks=[lark_callback]
+    )
+    
+    # 设置设备
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    try:
+        # 数据加载
+        train_loader, val_loader, test_loader = create_dataloaders(
+            root_dir=config['data_root'],
+            batch_size=config['batch_size'],
+            num_workers=config['num_workers'],
+            image_size=config['image_size'],
+            augment=True,
+            use_nir=config['use_nir']
+        )
+        
+        # 记录数据集信息到SwanLab
+        swanlab.log({
+            'dataset/train_batches': swanlab.Text(str(len(train_loader))),
+            'dataset/val_batches': swanlab.Text(str(len(val_loader))),
+            'dataset/test_batches': swanlab.Text(str(len(test_loader))),
+            'dataset/train_samples': swanlab.Text(str(len(train_loader) * config['batch_size'])),
+            'dataset/val_samples': swanlab.Text(str(len(val_loader) * config['batch_size'])),
+            'dataset/test_samples': swanlab.Text(str(len(test_loader) * config['batch_size'])),
+        })
+
+        # 创建模型并记录模型信息
+        model = create_transcc_model({'patch_size':16, 'num_classes':2})
+        
+        # 加载预训练权重
+        pretrained_path = './pretrained_weights/vit_base_patch16_224.pth'
+        # 可选的融合策略: 'direct', 'interpolate', 'average_pairs', 'skip'
+        model = load_pretrained_weights(model, pretrained_path, fusion_strategy='interpolate')
+        
+        model = model.to(device)
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        swanlab.log({
+            'model/total_params': swanlab.Text(str(total_params)),
+            'model/trainable_params': swanlab.Text(str(trainable_params)),
+            'model/input_channels': swanlab.Text(str(config['input_channels'])),
+        })
+        
+        # 损失函数和优化器
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=config['learning_rate'],
+            weight_decay=config['weight_decay']
+        )
+
+        # Warm-up阶段
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=5
+        )
+        # 主调度器
+        main_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=30,          # 第一个重启周期
+            T_mult=2,        # 周期倍增因子
+            eta_min=1e-6,    # 最小学习率
+            last_epoch=-1
+        )
+        # 组合调度器
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[5]
+        )
+        
+        # 定义指标计算类
+        train_metrics = SegmentationMetrics(config['num_classes'])
+        val_metrics = SegmentationMetrics(config['num_classes'])
+        test_metrics = SegmentationMetrics(config['num_classes'])
+        
+        # 训练循环
+        best_iou = 0
+        best_epoch = 0
+        
+        lark_callback.send_msg(
+            content=f"{experiment_name} - 训练开始",  # 通知内容
+        )
+        for epoch in range(config['num_epochs']):       
+            # 记录学习率到SwanLab
+            swanlab.log({
+                'train/learning_rate': optimizer.param_groups[0]['lr']
+            })
+            
+            # 训练
+            train_loss, train_result = train_one_epoch(
+                model, train_loader, criterion, optimizer, device, train_metrics, epoch + 1
+            )
+            
+            # 验证
+            val_loss, val_result = validate(
+                model, val_loader, criterion, device, val_metrics, epoch + 1
+            )
+            
+            # 更新学习率
+            scheduler.step()
+            
+            # 记录训练和验证指标到SwanLab
+            swanlab.log({
+                'train/loss': train_loss,
+                'train/iou': train_result['iou'],
+                'train/precision': train_result['precision'],
+                'train/recall': train_result['recall'],
+                'train/f1': train_result['f1'],
+                'val/loss': val_loss,
+                'val/iou': val_result['iou'],
+                'val/precision': val_result['precision'],
+                'val/recall': val_result['recall'],
+                'val/f1': val_result['f1']
+            })
+            
+            # 每10个epoch创建样本图像
+            if (epoch + 1) % 10 == 0:
+                sample_figures = create_sample_images(model, val_loader, device, epoch + 1)
+                
+                # 逐个记录每个figure
+                for i, fig in enumerate(sample_figures):
+                    swanlab.log({f"Example_Images/epoch_{epoch+1}_sample_{i}": swanlab.Image(fig)})
+                    plt.close(fig)
+            
+
+            # 保存模型
+            if not os.path.exists(f'./checkpoints/{experiment_name}'):
+                os.mkdir(f'./checkpoints/{experiment_name}')
+            if val_result['iou'] > best_iou:
+                best_iou = val_result['iou']
+                best_epoch = epoch + 1
+                best_model_path = os.path.join(f'./checkpoints/{experiment_name}/', 'best_model.pth')
+                save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
+                
+                if val_result['iou'] > 0.6:
+                    lark_callback.send_msg(
+                        content=f"Current IoU: {val_result['iou']}, New best model is saved",  # 通知内容
+                    )
+            
+            if (epoch + 1) % 10 == 0:
+                checkpoint_path = os.path.join(f'./checkpoints/{experiment_name}', f'checkpoint_epoch_{epoch+1}.pth')
+                save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
+            
+        
+        # 记录最佳指标到SwanLab
+        swanlab.log({
+            'best/iou': swanlab.Text(str(best_iou)),
+            'best/epoch': swanlab.Text(str(best_epoch))
+        })
+        
+        # 测试
+        if os.path.exists(best_model_path):
+            checkpoint = torch.load(best_model_path)
+            model.load_state_dict(checkpoint['model_state_dict'])
+        
+        test_result = test(model, test_loader, device, test_metrics)
+        
+        # 记录测试结果到SwanLab
+        swanlab.log({
+            'test/iou': test_result['iou'],
+            'test/precision': test_result['precision'],
+            'test/recall': test_result['recall'],
+            'test/f1': test_result['f1']
+        })
+        
+    except Exception as e:
+        # 记录错误到SwanLab
+        try:
+            swanlab.log({'error': str(e)})
+        except:
+            pass
+        raise
+    
+    finally:
+        swanlab.finish()
+
+
+if __name__ == "__main__":
+    main()
 
 def train_one_epoch(model, train_loader, criterion, optimizer, device, metrics, epoch):
     model.train()

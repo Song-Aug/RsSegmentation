@@ -3,75 +3,21 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 import swanlab
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from io import BytesIO
-import PIL.Image
-import sys
-sys.path.append('..')
 
 from models.HDNet import HDNet
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
-
-
-def hdnet_loss(outputs, labels, weights=None):
-    """
-    HDNet的复合损失函数
-    
-    Args:
-        outputs: 模型输出，包含主输出和深度监督输出
-        labels: 真实标签 (B, H, W) 取值为 0 或 1
-        weights: 各个输出的权重
-    """
-    if weights is None:
-        # 默认权重：主输出权重最大，深度监督权重递减
-        weights = [1.0, 0.5, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
-    
-    # 解包输出
-    x_seg, x_bd, seg1, seg2, seg3, seg4, seg5, seg6, bd1, bd2, bd3, bd4, bd5, bd6 = outputs
-    
-    # 使用 CrossEntropyLoss，与 TransCC 和 UNetFormer 保持一致
-    criterion = nn.CrossEntropyLoss()
-    
-    # 确保标签为 long 类型，并且值在 [0, 1] 范围内
-    labels = labels.long()
-    labels = torch.clamp(labels, 0, 1)
-    
-    # 计算各个输出的损失
-    losses = []
-    
-    # 主分割损失
-    seg_loss = criterion(x_seg, labels)
-    losses.append(seg_loss)
-    
-    # 边界损失
-    bd_loss = criterion(x_bd, labels)
-    losses.append(bd_loss)
-    
-    # 深度监督损失
-    deep_outputs = [seg1, seg2, seg3, seg4, seg5, seg6, bd1, bd2, bd3, bd4, bd5, bd6]
-    
-    for i, output in enumerate(deep_outputs):
-        # 调整输出尺寸以匹配标签
-        if output.size()[2:] != labels.size()[1:]:
-            output = torch.nn.functional.interpolate(
-                output, size=labels.size()[1:], mode='bilinear', align_corners=False
-            )
-        
-        deep_loss = criterion(output, labels)
-        losses.append(deep_loss)
-    
-    # 计算加权总损失
-    total_loss = sum(w * loss for w, loss in zip(weights, losses))
-    
-    return total_loss, seg_loss, bd_loss
+from configs.hdnet_config import config
+from utils.losses import hdnet_loss
+from utils.checkpoint import save_checkpoint
+from utils.visualization import create_hdnet_sample_images
+from utils.trainer import test
 
 
 def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
@@ -85,13 +31,6 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
     for batch_idx, batch in enumerate(pbar):
         images = batch['image'].to(device)
         labels = batch['label'].to(device)
-        
-        # 调试：检查第一个batch的标签
-        if batch_idx == 0:
-            print(f"标签形状: {labels.shape}")
-            print(f"标签数据类型: {labels.dtype}")
-            print(f"标签值范围: min={labels.min()}, max={labels.max()}")
-            print(f"标签中的唯一值: {torch.unique(labels)}")
         
         optimizer.zero_grad()
         
@@ -180,129 +119,9 @@ def validate(model, val_loader, device, metrics, epoch):
     return avg_total_loss, avg_seg_loss, avg_bd_loss, val_metrics
 
 
-def test(model, test_loader, device, metrics):
-    model.eval()
-    metrics.reset()
-    
-    with torch.no_grad():
-        pbar = tqdm(test_loader, desc='Testing')
-        for batch in pbar:
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
-            
-            # 前向传播
-            outputs = model(images)
-            x_seg = outputs[0]  # 主分割输出
-
-            pred = torch.argmax(x_seg, dim=1).cpu().numpy()
-            target = labels.cpu().numpy()
-            # 确保target在[0,1]范围内
-            target = np.clip(target, 0, 1)
-            metrics.update(pred, target)
-    
-    test_metrics = metrics.get_metrics()
-    return test_metrics
-
-
-def save_checkpoint(model, optimizer, epoch, best_iou, save_path):
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'best_iou': best_iou,
-    }
-    torch.save(checkpoint, save_path)
-
-
-def create_sample_images(model, val_loader, device, epoch, num_samples=4):
-    """创建样本预测图像用于SwanLab可视化"""
-    model.eval()
-    
-    # 收集所有样本数据
-    samples_data = []
-    
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(val_loader):
-            if batch_idx >= num_samples:
-                break
-                
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
-            
-            outputs = model(images)
-            x_seg = outputs[0]  # 主分割输出
-            x_bd = outputs[1]   # 边界输出
-            
-            pred_seg = torch.argmax(x_seg, dim=1)
-            pred_bd = torch.argmax(x_bd, dim=1)
-            
-            # 只取第一张图像
-            img = images[0].cpu()
-            label = labels[0].cpu()
-            prediction_seg = pred_seg[0].cpu()
-            prediction_bd = pred_bd[0].cpu()
-            
-            # 处理原图
-            original_img = img[:3]  # 取RGB三个通道
-            
-            # 反标准化
-            if original_img.min() < 0:  # 检查是否经过标准化
-                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-                original_img = original_img * std + mean
-            
-            # 确保像素值在[0,1]范围内
-            original_img = torch.clamp(original_img, 0, 1)
-            original_img = original_img.permute(1, 2, 0).numpy()
-            
-            # 标签和预测转换为灰度图像
-            label_gray = label.numpy().astype(np.uint8)
-            pred_seg_gray = prediction_seg.numpy().astype(np.uint8)
-            pred_bd_gray = prediction_bd.numpy().astype(np.uint8)
-            
-            samples_data.append((original_img, label_gray, pred_seg_gray, pred_bd_gray))
-    
-    # 创建一个综合的figure
-    fig, axes = plt.subplots(num_samples, 4, figsize=(20, 5*num_samples))
-    fig.suptitle(f'HDNet Results - Epoch {epoch}', fontsize=16, fontweight='bold')
-    
-    for i, (original_img, label_gray, pred_seg_gray, pred_bd_gray) in enumerate(samples_data):
-        # 原图
-        axes[i, 0].imshow(original_img)
-        axes[i, 0].set_title(f'Sample {i} - Original', fontsize=12, fontweight='bold')
-        axes[i, 0].axis('off')
-        
-        # 真实标签
-        axes[i, 1].imshow(label_gray, cmap='gray', vmin=0, vmax=1)
-        axes[i, 1].set_title(f'Sample {i} - Ground Truth', fontsize=12, fontweight='bold')
-        axes[i, 1].axis('off')
-        
-        # 分割预测结果
-        axes[i, 2].imshow(pred_seg_gray, cmap='gray', vmin=0, vmax=1)
-        axes[i, 2].set_title(f'Sample {i} - Segmentation', fontsize=12, fontweight='bold')
-        axes[i, 2].axis('off')
-        
-        # 边界预测结果
-        axes[i, 3].imshow(pred_bd_gray, cmap='gray', vmin=0, vmax=1)
-        axes[i, 3].set_title(f'Sample {i} - Boundary', fontsize=12, fontweight='bold')
-        axes[i, 3].axis('off')
-    
-    # 添加图例
-    legend_elements = [
-        patches.Patch(color='black', label='Background'),
-        patches.Patch(color='white', label='Building')
-    ]
-    fig.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.02))
-    
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.93, bottom=0.05)
-    
-    return fig
-
-
 def main():
     # 设置随机种子确保实验可重现
-    seed = 42
+    seed = config['seed']
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # 如果使用多GPU
@@ -313,24 +132,6 @@ def main():
     # 设置确定性算法（可选，但会影响性能）
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    
-    # 配置实验参数
-    config = {
-        'data_root': '/mnt/data1/rove/asset/GF7_Building/3BandsSample',
-        'batch_size': 1,
-        'num_workers': 4,
-        'image_size': 512,
-        'input_channels': 3,  # RGB
-        'use_nir': False,
-        'num_epochs': 120,
-        'learning_rate': 0.001,
-        'weight_decay': 1e-4,
-        'save_dir': './runs',
-        'model_name': 'hdnet_3bands',
-        'base_channel': 48,
-        'num_classes': 2,  # 2类：背景(0)和建筑物(1)
-        'seed': seed
-    }
     
     # 初始化SwanLab实验看板
     experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
@@ -448,7 +249,7 @@ def main():
             
             # 每10个epoch创建样本图像
             if (epoch + 1) % 10 == 0:
-                sample_figure = create_sample_images(model, val_loader, device, epoch + 1)
+                sample_figure = create_hdnet_sample_images(model, val_loader, device, epoch + 1)
                 swanlab.log({"Example_Images": swanlab.Image(sample_figure)})
                 plt.close(sample_figure)  # 关闭figure释放内存
             
