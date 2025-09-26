@@ -164,8 +164,9 @@ class BuildingSegmentationDataset(Dataset):
                 label = label.convert('L')
             label = np.array(label)
             
-            
-            label = self.process_label(label)
+            # 关键修复：确保标签值为0或1
+            if label.max() > 1:
+                label[label > 0] = 1
             
             # 确保图像和标签尺寸匹配
             if image.shape[:2] != label.shape:
@@ -173,7 +174,8 @@ class BuildingSegmentationDataset(Dataset):
                     (image.shape[1], image.shape[0]), Image.NEAREST
                 )
                 label = np.array(label)
-                label = self.process_label(label)  # 重新处理调整后的标签
+                if label.max() > 1: # 重新检查
+                    label[label > 0] = 1
             
             # # 数据增强
             image, label = self.apply_augmentation(image, label)
@@ -186,8 +188,8 @@ class BuildingSegmentationDataset(Dataset):
                 image = torch.from_numpy(image.transpose(2, 0, 1)).float()
                 label = torch.from_numpy(label).long()
             
-            # 最终检查标签范围
-            label = torch.clamp(label, 0, 1)
+            # 最终检查标签范围和类型
+            label = torch.clamp(label, 0, 1).long()
             
             return {
                 'image': image,
