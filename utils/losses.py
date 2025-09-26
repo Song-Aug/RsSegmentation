@@ -1,5 +1,38 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+def generate_boundary_labels(labels):
+    """
+    从分割标签动态生成边界标签。
+    
+    Args:
+        labels (torch.Tensor): 分割标签 (B, H, W)，值为0或1。
+        
+    Returns:
+        torch.Tensor: 边界标签 (B, H, W)，值为0或1。
+    """
+    # 确保标签是浮点型以便进行卷积操作
+    labels_float = labels.float().unsqueeze(1)  # (B, 1, H, W)
+    
+    # 使用一个简单的3x3核进行最大池化和最小池化
+    kernel = torch.ones((1, 1, 3, 3), device=labels.device, dtype=torch.float32)
+    
+    # 使用padding='same'需要PyTorch 1.9+，这里手动padding
+    padded_labels = F.pad(labels_float, (1, 1, 1, 1), mode='replicate')
+    
+    # 最大池化模拟膨胀
+    dilated = F.conv2d(padded_labels, kernel, padding=0) > 0
+    dilated = dilated.squeeze(1).long() # (B, H, W)
+    
+    # 最小池化模拟腐蚀
+    eroded = F.conv2d(padded_labels, kernel, padding=0) == 9 # 只有当3x3窗口内全是1时，结果才是9
+    eroded = eroded.squeeze(1).long() # (B, H, W)
+    
+    # 边界 = 膨胀结果 - 腐蚀结果
+    boundary = dilated - eroded
+    return boundary.long()
+
 
 def hdnet_loss(outputs, labels, weights=None):
     """
@@ -12,46 +45,56 @@ def hdnet_loss(outputs, labels, weights=None):
     """
     if weights is None:
         # 默认权重：主输出权重最大，深度监督权重递减
-        weights = [1.0, 0.5, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+        weights = [1.0, 1.0, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
     
     # 解包输出
     x_seg, x_bd, seg1, seg2, seg3, seg4, seg5, seg6, bd1, bd2, bd3, bd4, bd5, bd6 = outputs
     
-    # 使用 CrossEntropyLoss，与 TransCC 和 UNetFormer 保持一致
-    criterion = nn.CrossEntropyLoss()
+    # 使用 CrossEntropyLoss
+    criterion_seg = nn.CrossEntropyLoss()
+    # 边界损失使用BCE，因为边界预测是单通道的
+    criterion_bd = nn.BCEWithLogitsLoss() 
     
-    # 确保标签为 long 类型，并且值在 [0, 1] 范围内
+    # 确保分割标签为 long 类型
     labels = labels.long()
-    labels = torch.clamp(labels, 0, 1)
     
-    # 计算各个输出的损失
-    losses = []
+    # 动态生成边界标签
+    boundary_labels = generate_boundary_labels(labels).float() # BCE需要float类型的标签
+
+    # --- 1. 计算分割损失 ---
+    seg_losses = []
+    seg_outputs = [x_seg, seg1, seg2, seg3, seg4, seg5, seg6]
     
-    # 主分割损失
-    seg_loss = criterion(x_seg, labels)
-    losses.append(seg_loss)
-    
-    # 边界损失
-    bd_loss = criterion(x_bd, labels)
-    losses.append(bd_loss)
-    
-    # 深度监督损失
-    deep_outputs = [seg1, seg2, seg3, seg4, seg5, seg6, bd1, bd2, bd3, bd4, bd5, bd6]
-    
-    for i, output in enumerate(deep_outputs):
-        # 调整输出尺寸以匹配标签
+    for output in seg_outputs:
         if output.size()[2:] != labels.size()[1:]:
-            output = torch.nn.functional.interpolate(
-                output, size=labels.size()[1:], mode='bilinear', align_corners=False
-            )
+            output = F.interpolate(output, size=labels.size()[1:], mode='bilinear', align_corners=False)
+        seg_losses.append(criterion_seg(output, labels))
+
+    # --- 2. 计算边界损失 ---
+    bd_losses = []
+    bd_outputs = [x_bd, bd1, bd2, bd3, bd4, bd5, bd6]
+
+    for output in bd_outputs:
+        # 边界预测是单通道的，所以标签也需要是 (B, 1, H, W)
+        if output.size()[2:] != boundary_labels.size()[1:]:
+            output = F.interpolate(output, size=boundary_labels.size()[1:], mode='bilinear', align_corners=False)
         
-        deep_loss = criterion(output, labels)
-        losses.append(deep_loss)
+        # 确保标签有正确的形状
+        bd_labels_reshaped = boundary_labels.unsqueeze(1)
+        bd_losses.append(criterion_bd(output, bd_labels_reshaped))
+
+    # --- 3. 组合并加权 ---
+    # 权重顺序：x_seg, x_bd, seg1-6, bd1-6
+    all_losses = [seg_losses[0], bd_losses[0]] + seg_losses[1:] + bd_losses[1:]
     
     # 计算加权总损失
-    total_loss = sum(w * loss for w, loss in zip(weights, losses))
+    total_loss = sum(w * loss for w, loss in zip(weights, all_losses))
     
-    return total_loss, seg_loss, bd_loss
+    # 返回主要损失用于监控
+    main_seg_loss = seg_losses[0]
+    main_bd_loss = bd_losses[0]
+    
+    return total_loss, main_seg_loss, main_bd_loss
 
 # =================================================================
 # MSSDMPA-Net Losses and Metrics
