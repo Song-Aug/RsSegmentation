@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-@Time ： 2024/5/27 10:30
-@Auth ： Song
-@File ：unetformer_config.py
-@IDE ：PyCharm
-@Motto：No pains, no gains
-"""
 # 配置实验参数
 config = {
     'data_root': '/mnt/sda1/songyufei/asset/GF7_Building/3Bands',

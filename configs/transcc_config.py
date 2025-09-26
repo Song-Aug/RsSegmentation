@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-@Time ： 2024/5/26 21:21
-@Auth ： Song
-@File ：transcc_config.py
-@IDE ：PyCharm
-@Motto：No pains, no gains
-"""
 # 配置实验参数
 config = {
     'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
