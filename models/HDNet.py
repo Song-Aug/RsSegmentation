@@ -1,26 +1,3 @@
-"""
-HDNet: High-Resolution Decoupled Network for Remote Sensing Image Segmentation
-HDNet: 高分辨率解耦网络，用于遥感图像分割
-
-该模型结合了高分辨率网络和解耦机制，实现了高精度的遥感图像分割。
-主要特点：
-1. 多阶段解耦机制，分离边界和区域信息
-2. 深度监督学习，提高训练效果
-3. 流场生成机制，实现特征对齐
-4. 高分辨率特征维持，保持细节信息
-
-主要组件：
-- Generate_Flowfield: 流场生成器，用于特征对齐
-- FusionModule: 融合模块，实现边界和区域特征融合
-- BasicBlock: 基础残差块，构建网络基础单元
-- Bottleneck: 瓶颈残差块，用于深层网络构建
-- Stagethree_decouple: 第三阶段解耦模块，三分支高分辨率处理
-- Stagetwo_decouple: 第二阶段解耦模块，双分支高分辨率处理
-- HighResolutionDecoupledNet: 主网络架构，整合所有模块
-
-作者：从 ISPRS_HD-Net-main 中提取整理，并添加详细中文注释
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

@@ -134,9 +134,9 @@ def main():
     torch.backends.cudnn.benchmark = False
     
     # 初始化SwanLab实验看板
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
+    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
     swanlab.init(
-        project="Building-Segmentation-HDNet",
+        project="Building-Segmentation-3Bands",
         experiment_name=experiment_name,
         config=config,
         description="HDNet模型用于3波段建筑物分割实验",

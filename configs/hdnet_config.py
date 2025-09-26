@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # 配置实验参数
 config = {
-    'data_root': '/mnt/data1/rove/asset/GF7_Building/3BandsSample',
-    'batch_size': 1,
+    'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
+    'batch_size': 6,
     'num_workers': 4,
     'image_size': 512,
     'input_channels': 3,  # RGB
