@@ -126,8 +126,8 @@ def main():
     random.seed(42)
     
     # 数据路径配置
-    source_root = "/mnt/sda1/songyufei/asset/GF7_Building/3Bands"
-    target_root = "/mnt/sda1/songyufei/asset/GF7_Building/3BandsSample"
+    source_root = "/mnt/data1/rove/asset/GF7_Building/3Bands"
+    target_root = "/mnt/data1/rove/asset/GF7_Building/3BandsSample"
     sample_ratio = 0.01  # 1%抽样
     
     # 检查源路径是否存在

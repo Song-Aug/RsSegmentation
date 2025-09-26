@@ -415,13 +415,13 @@ def main():
     np.random.seed(seed)
     # 配置实验参数
     config = {
-        'data_root': '/mnt/sda1/songyufei/asset/GF7_Building/3Bands',
-        'batch_size': 4,
+        'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
+        'batch_size': 16,
         'num_workers': 4,
         'image_size': 512,
         'input_channels': 3,  # RGB + NIR
         'use_nir': False,
-        'num_epochs': 200,
+        'num_epochs': 450,
         'learning_rate': 0.001,
         'weight_decay': 1e-4,
         'save_dir': './runs',
@@ -508,7 +508,7 @@ def main():
         # 主调度器
         main_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer,
-            T_0=20,          # 第一个重启周期
+            T_0=30,          # 第一个重启周期
             T_mult=2,        # 周期倍增因子
             eta_min=1e-6,    # 最小学习率
             last_epoch=-1
@@ -549,7 +549,7 @@ def main():
             )
             
             # 更新学习率
-            scheduler.step(val_result['iou'])
+            scheduler.step()
             
             # 记录训练和验证指标到SwanLab
             swanlab.log({
@@ -583,7 +583,8 @@ def main():
                 best_epoch = epoch + 1
                 best_model_path = os.path.join(f'./checkpoints/{experiment_name}/', 'best_model.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                if val_result['iou'] > 0.7:
+                
+                if val_result['iou'] > 0.6:
                     lark_callback.send_msg(
                         content=f"Current IoU: {val_result['iou']}, New best model is saved",  # 通知内容
                     )
