@@ -96,6 +96,59 @@ def hdnet_loss(outputs, labels, weights=None):
     
     return total_loss, main_seg_loss, main_bd_loss
 
+
+def _dice_loss_from_logits(logits: torch.Tensor, labels: torch.Tensor, smooth: float = 1e-6) -> torch.Tensor:
+    """计算 softmax Dice 损失。"""
+    num_classes = logits.shape[1]
+    probs = torch.softmax(logits, dim=1)
+    labels_onehot = F.one_hot(labels.long(), num_classes).permute(0, 3, 1, 2).float()
+    intersection = torch.sum(probs * labels_onehot, dim=(0, 2, 3))
+    union = torch.sum(probs + labels_onehot, dim=(0, 2, 3))
+    dice = (2 * intersection + smooth) / (union + smooth)
+    return 1 - dice.mean()
+
+
+def transcc_v2_loss(
+    outputs,
+    labels,
+    dice_weight: float = 0.1,
+    aux_weight: float = 0.4,
+    boundary_weight: float = 0.5,
+):
+    """TransCC V2 复合损失函数。"""
+
+    seg_main, boundary_main, seg_aux1, seg_aux2, boundary_aux = outputs
+
+    criterion_ce = nn.CrossEntropyLoss()
+    criterion_bd = nn.BCEWithLogitsLoss()
+
+    labels_long = labels.long()
+
+    # 主分割损失（CE + Dice）
+    seg_ce = criterion_ce(seg_main, labels_long)
+    seg_dice = _dice_loss_from_logits(seg_main, labels_long)
+    seg_loss = seg_ce + dice_weight * seg_dice
+
+    # 辅助分割损失
+    aux_losses = []
+    for aux_seg in (seg_aux1, seg_aux2):
+        aux_losses.append(criterion_ce(aux_seg, labels_long))
+    if aux_losses:
+        aux_loss = sum(aux_losses) / len(aux_losses)
+    else:
+        aux_loss = torch.zeros(1, device=seg_main.device, dtype=seg_main.dtype)
+
+    # 边界损失
+    boundary_labels = generate_boundary_labels(labels).float().unsqueeze(1)
+    boundary_losses = []
+    for bd_out in (boundary_main, boundary_aux):
+        boundary_losses.append(criterion_bd(bd_out, boundary_labels))
+    boundary_loss = sum(boundary_losses) / len(boundary_losses)
+
+    total_loss = seg_loss + aux_weight * aux_loss + boundary_weight * boundary_loss
+
+    return total_loss, seg_loss, boundary_loss
+
 # =================================================================
 # MSSDMPA-Net Losses and Metrics
 # =================================================================

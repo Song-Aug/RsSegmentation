@@ -10,7 +10,7 @@ from datetime import datetime
 import swanlab
 import matplotlib.pyplot as plt
 
-from models.TransCC_V2 import create_transcc_model
+from models.TransCC import create_transcc_model
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
 from configs.transcc_config import config
