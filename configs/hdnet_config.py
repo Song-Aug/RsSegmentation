@@ -7,7 +7,7 @@ config = {
     'image_size': 512,
     'input_channels': 3,  # RGB
     'use_nir': False,
-    'num_epochs': 120,
+    'num_epochs': 300,
     'learning_rate': 0.001,
     'weight_decay': 1e-4,
     'save_dir': './runs',

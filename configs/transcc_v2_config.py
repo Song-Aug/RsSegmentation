@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # TransCC V2 训练配置
 config = {
-    'data_root': '/mnt/data1/rove/asset/GF7_Building/3BandsSample',
-    'batch_size': 4,
+    'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
+    'batch_size': 16,
     'num_workers': 4,
     'image_size': 512,
     'input_channels': 3,
