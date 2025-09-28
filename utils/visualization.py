@@ -87,3 +87,68 @@ def create_hdnet_sample_images(model, val_loader, device, epoch, num_samples=4):
     plt.subplots_adjust(top=0.93, bottom=0.05)
     
     return fig
+
+
+def create_sample_images(model, val_loader, device, epoch, num_samples=4):
+    """
+    通用样本可视化函数，适配 TransCC/TransCC_V2/UNetFormer 等模型。
+    支持主分割输出和可选边界输出，返回 matplotlib figure 列表。
+    """
+    import torch
+    import matplotlib.pyplot as plt
+    model.eval()
+    figures = []
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(val_loader):
+            if batch_idx >= num_samples:
+                break
+            images = batch['image'].to(device)
+            labels = batch['label'].to(device)
+            outputs = model(images)
+            # 兼容 tuple/list 输出
+            if isinstance(outputs, (tuple, list)):
+                main_output = outputs[0]
+                # 尝试获取边界输出
+                boundary_output = None
+                if len(outputs) > 1 and outputs[1].shape[1] == 1:
+                    boundary_output = outputs[1]
+            else:
+                main_output = outputs
+                boundary_output = None
+            pred = torch.argmax(main_output, dim=1)
+            img = images[0].cpu()
+            label = labels[0].cpu()
+            prediction = pred[0].cpu()
+            original_img = img[:3]
+            if original_img.min() < 0:
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+                original_img = original_img * std + mean
+            original_img = torch.clamp(original_img, 0, 1)
+            original_img = original_img.permute(1, 2, 0).numpy()
+            label_gray = label.numpy().astype('uint8')
+            pred_gray = prediction.numpy().astype('uint8')
+            # 边界预测
+            if boundary_output is not None:
+                boundary_pred = torch.sigmoid(boundary_output[0, 0]).cpu().numpy()
+            else:
+                boundary_pred = None
+            # 创建matplotlib图表
+            fig, axes = plt.subplots(1, 4 if boundary_pred is not None else 3, figsize=(20, 5))
+            fig.suptitle(f'Epoch {epoch} - Sample {batch_idx}', fontsize=16, fontweight='bold')
+            axes[0].imshow(original_img)
+            axes[0].set_title('Original Image')
+            axes[0].axis('off')
+            axes[1].imshow(label_gray, cmap='gray', vmin=0, vmax=1)
+            axes[1].set_title('Ground Truth')
+            axes[1].axis('off')
+            axes[2].imshow(pred_gray, cmap='gray', vmin=0, vmax=1)
+            axes[2].set_title('Prediction')
+            axes[2].axis('off')
+            if boundary_pred is not None:
+                axes[3].imshow(boundary_pred, cmap='gray', vmin=0, vmax=1)
+                axes[3].set_title('Boundary')
+                axes[3].axis('off')
+            plt.tight_layout()
+            figures.append(fig)
+    return figures
