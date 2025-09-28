@@ -126,21 +126,9 @@ def validate(model, val_loader, device, metrics, epoch):
 def main():
     # 设置随机种子
     set_seed(config['seed'])
-
-    # swanlab实验看版配置
+    # 设置计算设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
-    swanlab.init(
-        project="Building-Segmentation-3Bands",
-        experiment_name=experiment_name,
-        config=config,
-        description="TransCCV2建筑物分割实验",
-        tags=["TransCCV2", "building-segmentation", "RGB"],
-        device='cuda' if torch.cuda.is_available() else 'cpu',
-        callbacks=[lark_callback]
-    )
-
-
+    
     try:
         # 创建数据加载器
         train_loader, val_loader, test_loader = create_dataloaders(
@@ -168,20 +156,19 @@ def main():
         if pretrained_path:
             model = load_pretrained_weights(model, pretrained_path, fusion_strategy)
 
+        # 计算并记录模型参数量
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        swanlab.log({
-            'model/total_params': swanlab.Text(str(total_params)),
-            'model/trainable_params': swanlab.Text(str(trainable_params)),
-            'model/input_channels': swanlab.Text(str(config['input_channels'])),
-        })
+        config['model_total_params'] = total_params
+        config['model_trainable_params'] = trainable_params
+        config['model_input_channels'] = config['input_channels']
 
+        # 优化器和学习率调度器
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config['learning_rate'],
             weight_decay=config['weight_decay']
         )
-
         warmup_scheduler = LinearLR(
             optimizer,
             start_factor=0.1,
@@ -199,21 +186,39 @@ def main():
             milestones=[config['warmup_epochs']]
         )
 
+        # 初始化评价指标
         train_metrics = SegmentationMetrics(config['num_classes'])
         val_metrics = SegmentationMetrics(config['num_classes'])
         test_metrics = SegmentationMetrics(config['num_classes'])
 
+        # SwanLab实验看板初始化
+        experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
+        swanlab.init(
+            project="Building-Segmentation-3Bands",
+            experiment_name=experiment_name,
+            config=config,
+            description="TransCCV2建筑物分割实验",
+            tags=["TransCCV2", "building-segmentation", "RGB"],
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+            callbacks=[lark_callback]
+        )
+
+        # 创建检查点目录
         checkpoint_dir = os.path.join('./checkpoints', experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
+
+        # 训练循环
+        lark_callback.send_msg(
+            content=(
+                f"实验名: {experiment_name}\n"
+                f"实验开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"模型: {config['model_name']}\n"
+                f"总参数量: {total_params:,}，可训练参数量: {trainable_params:,}"
+            )
+        )
         best_iou = 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, 'best_model.pth')
-
-
-        # 训练开始通知
-        lark_callback.send_msg(
-            content=f"{experiment_name} - 训练开始",
-        )
         for epoch in range(config['num_epochs']):
             swanlab.log({'train/learning_rate': optimizer.param_groups[0]['lr']})
 
@@ -227,7 +232,7 @@ def main():
 
             scheduler.step()
 
-            # 记录训练和验证指标到SwanLab，字段与transcc保持一致
+            # 记录训练和验证指标
             swanlab.log({
                 'train/total_loss': train_total,
                 'train/seg_loss': train_seg,
@@ -255,12 +260,16 @@ def main():
                 best_iou = val_result['iou']
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                # IoU大于0.6时发送通知
-                if val_result['iou'] > 0.6:
+                # IoU大于0.75时发送通知
+                if val_result['iou'] > 0.75:
                     lark_callback.send_msg(
-                        content=f"Current IoU: {val_result['iou']}, New best model is saved",
+                        content=(
+                            f"当前IoU: {val_result['iou']:.4f}\n"
+                            f"已训练epoch: {epoch + 1}\n"
+                            f"当前学习率: {optimizer.param_groups[0]['lr']:.6g}\n"
+                            f"新best模型已保存"
+                        )
                     )
-
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
