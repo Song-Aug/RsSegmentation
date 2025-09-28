@@ -124,11 +124,12 @@ def validate(model, val_loader, device, metrics, epoch):
 
 
 def main():
-
+    # 设置随机种子
     set_seed(config['seed'])
+
+    # swanlab实验看版配置
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
-    # swanlab配置与transcc一致
+    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
     swanlab.init(
         project="Building-Segmentation-3Bands",
         experiment_name=experiment_name,
@@ -141,6 +142,7 @@ def main():
 
 
     try:
+        # 创建数据加载器
         train_loader, val_loader, test_loader = create_dataloaders(
             root_dir=config['data_root'],
             batch_size=config['batch_size'],
@@ -150,17 +152,7 @@ def main():
             use_nir=config['use_nir']
         )
 
-        # 记录数据集信息到SwanLab，内容与transcc一致
-        swanlab.log({
-            'dataset/train_batches': swanlab.Text(str(len(train_loader))),
-            'dataset/val_batches': swanlab.Text(str(len(val_loader))),
-            'dataset/test_batches': swanlab.Text(str(len(test_loader))),
-            'dataset/train_samples': swanlab.Text(str(len(train_loader) * config['batch_size'])),
-            'dataset/val_samples': swanlab.Text(str(len(val_loader) * config['batch_size'])),
-            'dataset/test_samples': swanlab.Text(str(len(test_loader) * config['batch_size'])),
-        })
-
-
+        # 模型初始化
         model = create_transcc_v2({
             'img_size': config['image_size'],
             'patch_size': 16,
@@ -168,6 +160,14 @@ def main():
             'num_classes': config['num_classes'],
         })
         model = model.to(device)
+
+        # 加载ViT预训练权重
+        from utils.weights import load_pretrained_weights
+        pretrained_path = config.get('pretrained_weights', None)
+        fusion_strategy = config.get('fusion_strategy', 'interpolate')
+        if pretrained_path:
+            model = load_pretrained_weights(model, pretrained_path, fusion_strategy)
+
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         swanlab.log({
