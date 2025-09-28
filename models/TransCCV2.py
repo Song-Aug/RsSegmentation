@@ -88,7 +88,7 @@ class DecoderV2(nn.Module):
         )
         self.seg_head_main = nn.Conv2d(decoder_channels[3] // 2, num_classes, kernel_size=1)
 
-        # 边界监督分支
+        # 边界监督分支（输入应为128通道）
         self.boundary_head_aux = nn.Sequential(
             ConvBlock(decoder_channels[2], decoder_channels[2] // 2),
             nn.Conv2d(decoder_channels[2] // 2, 1, kernel_size=1)
@@ -148,10 +148,12 @@ class DecoderV2(nn.Module):
         x = self.feature_aggregators[1](x)
         seg_aux2 = self.seg_head_stage2(x)
 
+
         # Stage 3: 128 -> 256
         x = self.cbam_blocks[2](x)
         x = F.relu(self.upsample_bn[2](self.upsample_layers[2](x)))
-        boundary_aux = self.boundary_head_aux(x)
+        x_128 = x  # 128通道特征
+        boundary_aux = self.boundary_head_aux(x_128)
         if len(layer_features) >= 3:
             x = self.skip_connections[2](layer_features[2], x)
         x = self.feature_aggregators[2](x)

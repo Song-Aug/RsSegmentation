@@ -16,7 +16,7 @@ import swanlab
 from configs.transcc_v2_config import config
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
-from models.TransCC_V2 import create_transcc_v2
+from models.TransCCV2 import create_transcc_v2
 from utils.checkpoint import save_checkpoint
 from utils.losses import transcc_v2_loss
 from utils.trainer import test
