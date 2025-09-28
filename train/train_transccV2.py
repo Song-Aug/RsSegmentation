@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 import random
 
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -12,6 +13,13 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import swanlab
+
+# webhook配置，与transcc一致
+from swanlab.plugin.notification import LarkCallback
+lark_callback = LarkCallback(
+    webhook_url="https://open.feishu.cn/open-apis/bot/v2/hook/5cd99837-5be3-4438-975f-89697bb5250c",
+    secret="wzn4LqIgfwN4TRk2Mecc1b"
+)
 
 from configs.transcc_v2_config import config
 from data_process import create_dataloaders
@@ -116,19 +124,21 @@ def validate(model, val_loader, device, metrics, epoch):
 
 
 def main():
+
     set_seed(config['seed'])
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
     experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d%H%M')}"
+    # swanlab配置与transcc一致
     swanlab.init(
-        project='Building-Segmentation-TransCCV2',
+        project="Building-Segmentation-3Bands",
         experiment_name=experiment_name,
         config=config,
-        description='TransCC V2 boundary-aware training',
-        tags=['TransCC_V2', 'building-segmentation', 'RGB'],
-        device='cuda' if torch.cuda.is_available() else 'cpu'
+        description="TransCCV2建筑物分割实验",
+        tags=["TransCCV2", "building-segmentation", "RGB"],
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        callbacks=[lark_callback]
     )
+
 
     try:
         train_loader, val_loader, test_loader = create_dataloaders(
@@ -140,11 +150,16 @@ def main():
             use_nir=config['use_nir']
         )
 
+        # 记录数据集信息到SwanLab，内容与transcc一致
         swanlab.log({
             'dataset/train_batches': swanlab.Text(str(len(train_loader))),
             'dataset/val_batches': swanlab.Text(str(len(val_loader))),
-            'dataset/test_batches': swanlab.Text(str(len(test_loader)))
+            'dataset/test_batches': swanlab.Text(str(len(test_loader))),
+            'dataset/train_samples': swanlab.Text(str(len(train_loader) * config['batch_size'])),
+            'dataset/val_samples': swanlab.Text(str(len(val_loader) * config['batch_size'])),
+            'dataset/test_samples': swanlab.Text(str(len(test_loader) * config['batch_size'])),
         })
+
 
         model = create_transcc_v2({
             'img_size': config['image_size'],
@@ -153,12 +168,12 @@ def main():
             'num_classes': config['num_classes'],
         })
         model = model.to(device)
-
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         swanlab.log({
             'model/total_params': swanlab.Text(str(total_params)),
-            'model/trainable_params': swanlab.Text(str(trainable_params))
+            'model/trainable_params': swanlab.Text(str(trainable_params)),
+            'model/input_channels': swanlab.Text(str(config['input_channels'])),
         })
 
         optimizer = optim.AdamW(
@@ -194,6 +209,11 @@ def main():
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, 'best_model.pth')
 
+
+        # 训练开始通知
+        lark_callback.send_msg(
+            content=f"{experiment_name} - 训练开始",
+        )
         for epoch in range(config['num_epochs']):
             swanlab.log({'train/learning_rate': optimizer.param_groups[0]['lr']})
 
@@ -207,6 +227,7 @@ def main():
 
             scheduler.step()
 
+            # 记录训练和验证指标到SwanLab，字段与transcc保持一致
             swanlab.log({
                 'train/total_loss': train_total,
                 'train/seg_loss': train_seg,
@@ -234,10 +255,16 @@ def main():
                 best_iou = val_result['iou']
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
+                # IoU大于0.6时发送通知
+                if val_result['iou'] > 0.6:
+                    lark_callback.send_msg(
+                        content=f"Current IoU: {val_result['iou']}, New best model is saved",
+                    )
 
-            if (epoch + 1) % 20 == 0:
+            if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
+
 
         swanlab.log({
             'best/iou': swanlab.Text(str(best_iou)),
@@ -247,6 +274,7 @@ def main():
         if os.path.exists(best_model_path):
             checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
+
 
         test_result = test(model, test_loader, device, test_metrics)
         swanlab.log({
