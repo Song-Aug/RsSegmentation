@@ -151,9 +151,9 @@ class DecoderV2(nn.Module):
 
         # Stage 3: 128 -> 256
         x = self.cbam_blocks[2](x)
-        x = F.relu(self.upsample_bn[2](self.upsample_layers[2](x)))
-        x_128 = x  # 128通道特征
+        x_128 = x  # 128通道特征（上采样前）
         boundary_aux = self.boundary_head_aux(x_128)
+        x = F.relu(self.upsample_bn[2](self.upsample_layers[2](x)))
         if len(layer_features) >= 3:
             x = self.skip_connections[2](layer_features[2], x)
         x = self.feature_aggregators[2](x)
