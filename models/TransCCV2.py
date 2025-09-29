@@ -5,14 +5,6 @@ import math
 from typing import List, Optional, Tuple
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-# =================================================================================
-# All necessary modules from TransCC.py are now self-contained in this file.
-# =================================================================================
-
-# +---------------------------------------------------------------------------+
-# | Basic Building Blocks (Attention, MLP, Conv, etc.)                        |
-# +---------------------------------------------------------------------------+
-
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
         super().__init__()
@@ -243,10 +235,17 @@ class Encoder(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         
+        # --- FIX START ---
+        # 使用关键字参数以避免位置参数混淆
         self.blocks = nn.ModuleList([
-            TransformerBlock(embed_dim, num_heads, mlp_ratio, qkv_bias, drop_rate, attn_drop_rate, dpr[i], norm_layer)
+            TransformerBlock(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer
+            )
             for i in range(depth)
         ])
+        # --- FIX END ---
+        
         self.norm = norm_layer(embed_dim)
         self.apply(self._init_weights)
     
@@ -470,14 +469,14 @@ class DecoderV2(nn.Module):
         seg_main = self.seg_head_main(x)
         boundary_main = self.boundary_head_main(x)
 
-        # Upsample all outputs to original image size
-        seg_main = F.interpolate(seg_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
-        seg_aux1 = F.interpolate(seg_aux1, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
-        seg_aux2 = F.interpolate(seg_aux2, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
-        boundary_aux = F.interpolate(boundary_aux, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
-        boundary_main = F.interpolate(boundary_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+        # Upsample all outputs to original image size for loss calculation
+        seg_main_out = F.interpolate(seg_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+        seg_aux1_out = F.interpolate(seg_aux1, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+        seg_aux2_out = F.interpolate(seg_aux2, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+        boundary_aux_out = F.interpolate(boundary_aux, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+        boundary_main_out = F.interpolate(boundary_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
 
-        return seg_main, boundary_main, seg_aux1, seg_aux2, boundary_aux
+        return seg_main_out, boundary_main_out, seg_aux1_out, seg_aux2_out, boundary_aux_out
 
 
 class TransCC_V2(nn.Module):
