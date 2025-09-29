@@ -219,6 +219,20 @@ def main():
         best_iou = 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, 'best_model.pth')
+
+
+        # 本地日志配置
+        import logging
+        local_log_path = os.path.join(checkpoint_dir, 'train_log.txt')
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s %(levelname)s: %(message)s',
+            handlers=[
+                logging.FileHandler(local_log_path, encoding='utf-8'),
+                logging.StreamHandler()
+            ]
+        )
+
         for epoch in range(config['num_epochs']):
             swanlab.log({'train/learning_rate': optimizer.param_groups[0]['lr']})
 
@@ -249,6 +263,15 @@ def main():
                 'val/recall': val_result['recall'],
                 'val/f1': val_result['f1']
             })
+
+
+            # 本地日志写入（info级别）
+            logging.info(
+                f"epoch: {epoch+1}, "
+                f"train_iou: {train_result['iou']:.4f}, val_iou: {val_result['iou']:.4f}, "
+                f"train_loss: {train_total:.4f}, val_loss: {val_total:.4f}, "
+                f"lr: {optimizer.param_groups[0]['lr']:.6g}"
+            )
 
             if (epoch + 1) % 10 == 0:
                 figures = create_sample_images(model, val_loader, device, epoch + 1)
