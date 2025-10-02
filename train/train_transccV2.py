@@ -21,6 +21,7 @@ from utils.checkpoint import save_checkpoint
 from utils.losses import transcc_v2_loss
 from utils.trainer import test
 from utils.visualization import create_sample_images
+from utils.alerts_by_lark import send_message
 
 
 def set_seed(seed: int) -> None:
@@ -128,7 +129,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # W&B实验看板初始化
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d_%H%M')}"
+    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
     wandb.init(
         project="Building-Segmentation-3Bands",
         name=experiment_name,
@@ -221,6 +222,10 @@ def main():
         
         logging.info(f"实验开始: {experiment_name}")
         logging.info(f"模型: {config['model_name']}, 总参数量: {total_params:,}, 可训练参数量: {trainable_params:,}")
+        send_message(
+            title=f"实验开始: {experiment_name}",
+            content=f"模型: {config['model_name']}\n总参数量: {total_params:,}"
+        )
 
         # 训练循环
         best_iou = 0.0
