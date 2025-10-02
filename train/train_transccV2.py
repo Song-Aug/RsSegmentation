@@ -50,7 +50,7 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
         optimizer.zero_grad()
         outputs = model(images)
         loss, seg_loss, boundary_loss = transcc_v2_loss(
-            outputs, labels, seg_weight=1.0, boundary_weight=1.5, aux_weight=0.4
+            outputs, labels, seg_weight=1.0, boundary_weight=1.0, aux_weight=0.4
         )
         loss.backward()
         optimizer.step()
@@ -160,12 +160,10 @@ def main():
             }
         )
         model = model.to(device)
-
         wandb.watch(model, log="all", log_freq=100)
 
         # 加载ViT预训练权重
         from utils.weights import load_pretrained_weights
-
         pretrained_path = config.get("pretrained_weights", None)
         fusion_strategy = config.get("fusion_strategy", "interpolate")
         if pretrained_path:
@@ -174,7 +172,6 @@ def main():
         # 计算并记录模型参数量
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        # 将参数量更新到 wandb.config
         wandb.config.update(
             {
                 "model_total_params": total_params,
@@ -297,6 +294,11 @@ def main():
                 logging.info(
                     f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}"
                 )
+                if best_iou > 0.75:
+                    send_message(
+                        title=f"{experiment_name}：模型最佳指标更新",
+                        content=f"Epoch: {best_epoch}\nVal IoU: {best_iou:.4f}\nCur lr: {optimizer.param_groups[0]['lr']:.6g}",
+                    )
 
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(
@@ -323,9 +325,18 @@ def main():
         logging.info(
             f"Test results - IoU: {test_result['iou']:.4f}, F1: {test_result['f1']:.4f}"
         )
+        
+        send_message(
+            title=f"实验结束: {experiment_name}",
+            content=f"训练完成!\n最佳 Val IoU: {best_iou:.4f} (at epoch {best_epoch})\n测试集 IoU: {test_result['iou']:.4f}",
+        )
 
     except Exception as exc:
         logging.error(f"An error occurred: {exc}", exc_info=True)
+        send_message(
+            title=f"实验失败: {experiment_name}",
+            content=f"实验运行时发生错误: \n{exc}",
+        )
         raise
 
     finally:
