@@ -4,7 +4,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
 import random
-
+import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,15 +12,7 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
-import swanlab
-
-# webhook配置，与transcc一致
-from swanlab.plugin.notification import LarkCallback
-lark_callback = LarkCallback(
-    webhook_url="https://open.feishu.cn/open-apis/bot/v2/hook/5cd99837-5be3-4438-975f-89697bb5250c",
-    secret="wzn4LqIgfwN4TRk2Mecc1b"
-)
-
+import wandb
 from configs.transcc_v2_config import config
 from data_process import create_dataloaders
 from metrics import SegmentationMetrics
@@ -135,6 +127,16 @@ def main():
     # 设置计算设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    # W&B实验看板初始化
+    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d_%H%M')}"
+    wandb.init(
+        project="Building-Segmentation-3Bands",
+        name=experiment_name,
+        config=config,
+        notes="TransCCV2建筑物分割实验",
+        tags=["TransCCV2", "building-segmentation", "RGB"]
+    )
+    
     try:
         # 创建数据加载器
         train_loader, val_loader, test_loader = create_dataloaders(
@@ -155,6 +157,8 @@ def main():
         })
         model = model.to(device)
 
+        wandb.watch(model, log='all', log_freq=100)
+
         # 加载ViT预训练权重
         from utils.weights import load_pretrained_weights
         pretrained_path = config.get('pretrained_weights', None)
@@ -165,9 +169,12 @@ def main():
         # 计算并记录模型参数量
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        config['model_total_params'] = total_params
-        config['model_trainable_params'] = trainable_params
-        config['model_input_channels'] = config['input_channels']
+        # 将参数量更新到 wandb.config
+        wandb.config.update({
+            'model_total_params': total_params,
+            'model_trainable_params': trainable_params,
+            'model_input_channels': config['input_channels']
+        })
 
         # 优化器和学习率调度器
         optimizer = optim.AdamW(
@@ -197,38 +204,11 @@ def main():
         val_metrics = SegmentationMetrics(config['num_classes'])
         test_metrics = SegmentationMetrics(config['num_classes'])
 
-        # SwanLab实验看板初始化
-        experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
-        swanlab.init(
-            project="Building-Segmentation-3Bands",
-            experiment_name=experiment_name,
-            config=config,
-            description="TransCCV2建筑物分割实验",
-            tags=["TransCCV2", "building-segmentation", "RGB"],
-            device='cuda' if torch.cuda.is_available() else 'cpu',
-            callbacks=[lark_callback]
-        )
-
         # 创建检查点目录
         checkpoint_dir = os.path.join('./checkpoints', experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
-
-        # 训练循环
-        lark_callback.send_msg(
-            content=(
-                f"实验名: {experiment_name}\n"
-                f"实验开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"模型: {config['model_name']}\n"
-                f"总参数量: {total_params:,}，可训练参数量: {trainable_params:,}"
-            )
-        )
-        best_iou = 0.0
-        best_epoch = -1
-        best_model_path = os.path.join(checkpoint_dir, 'best_model.pth')
-
-
+        
         # 本地日志配置
-        import logging
         local_log_path = os.path.join(checkpoint_dir, 'train_log.txt')
         logging.basicConfig(
             level=logging.INFO,
@@ -238,10 +218,16 @@ def main():
                 logging.StreamHandler()
             ]
         )
+        
+        logging.info(f"实验开始: {experiment_name}")
+        logging.info(f"模型: {config['model_name']}, 总参数量: {total_params:,}, 可训练参数量: {trainable_params:,}")
+
+        # 训练循环
+        best_iou = 0.0
+        best_epoch = -1
+        best_model_path = os.path.join(checkpoint_dir, 'best_model.pth')
 
         for epoch in range(config['num_epochs']):
-            swanlab.log({'train/learning_rate': optimizer.param_groups[0]['lr']})
-
             train_total, train_seg, train_bd, train_result = train_one_epoch(
                 model, train_loader, optimizer, device, train_metrics, epoch + 1
             )
@@ -252,8 +238,10 @@ def main():
 
             scheduler.step()
 
-            # 记录训练和验证指标
-            swanlab.log({
+            # 使用 wandb.log 记录训练和验证指标
+            wandb.log({
+                'epoch': epoch + 1,
+                'train/learning_rate': optimizer.param_groups[0]['lr'],
                 'train/total_loss': train_total,
                 'train/seg_loss': train_seg,
                 'train/bd_loss': train_bd,
@@ -270,8 +258,6 @@ def main():
                 'val/f1': val_result['f1']
             })
 
-
-            # 本地日志写入（info级别）
             logging.info(
                 f"epoch: {epoch+1}, "
                 f"train_iou: {train_result['iou']:.4f}, val_iou: {val_result['iou']:.4f}, "
@@ -281,56 +267,43 @@ def main():
 
             if (epoch + 1) % 10 == 0:
                 figures = create_sample_images(model, val_loader, device, epoch + 1)
-                for idx, fig in enumerate(figures):
-                    swanlab.log({f'Example_Images/epoch_{epoch+1}_sample_{idx}': swanlab.Image(fig)})
+                log_images = {f'Example_Images/epoch_{epoch+1}_sample_{idx}': wandb.Image(fig) for idx, fig in enumerate(figures)}
+                wandb.log(log_images)
+                for fig in figures:
                     plt.close(fig)
 
             if val_result['iou'] > best_iou:
                 best_iou = val_result['iou']
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                # IoU大于0.75时发送通知
-                if val_result['iou'] > 0.75:
-                    lark_callback.send_msg(
-                        content=(
-                            f"当前IoU: {val_result['iou']:.4f}\n"
-                            f"已训练epoch: {epoch + 1}\n"
-                            f"当前学习率: {optimizer.param_groups[0]['lr']:.6g}\n"
-                            f"新best模型已保存"
-                        )
-                    )
+                logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
+
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
                 save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
 
-
-        swanlab.log({
-            'best/iou': swanlab.Text(str(best_iou)),
-            'best/epoch': swanlab.Text(str(best_epoch))
-        })
+        wandb.summary['best_iou'] = best_iou
+        wandb.summary['best_epoch'] = best_epoch
 
         if os.path.exists(best_model_path):
             checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
 
-
         test_result = test(model, test_loader, device, test_metrics)
-        swanlab.log({
+        wandb.log({
             'test/iou': test_result['iou'],
             'test/precision': test_result['precision'],
             'test/recall': test_result['recall'],
             'test/f1': test_result['f1']
         })
+        logging.info(f"Test results - IoU: {test_result['iou']:.4f}, F1: {test_result['f1']:.4f}")
 
     except Exception as exc:
-        try:
-            swanlab.log({'error': str(exc)})
-        except Exception:
-            pass
+        logging.error(f"An error occurred: {exc}", exc_info=True)
         raise
 
     finally:
-        swanlab.finish()
+        wandb.finish()
 
 
 if __name__ == '__main__':
