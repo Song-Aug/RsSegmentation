@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 def create_hdnet_sample_images(model, val_loader, device, epoch, num_samples=4):
-    """创建HDNet样本预测图像用于SwanLab可视化（包含分割和边界）"""
     model.eval()
     
     # 收集所有样本数据
@@ -90,12 +89,6 @@ def create_hdnet_sample_images(model, val_loader, device, epoch, num_samples=4):
 
 
 def create_sample_images(model, val_loader, device, epoch, num_samples=4):
-    """
-    通用样本可视化函数，适配 TransCC/TransCC_V2/UNetFormer 等模型。
-    支持主分割输出和可选边界输出，返回 matplotlib figure 列表。
-    """
-    import torch
-    import matplotlib.pyplot as plt
     model.eval()
     figures = []
     with torch.no_grad():
@@ -146,7 +139,7 @@ def create_sample_images(model, val_loader, device, epoch, num_samples=4):
             axes[2].set_title('Prediction')
             axes[2].axis('off')
             if boundary_pred is not None:
-                axes[3].imshow(boundary_pred, cmap='gray', vmin=0, vmax=1)
+                axes[3].imshow(boundary_pred, cmap='hot', vmin=0, vmax=1)
                 axes[3].set_title('Boundary')
                 axes[3].axis('off')
             plt.tight_layout()
