@@ -143,3 +143,32 @@ def create_dataloaders(root_dir, batch_size=16, num_workers=4, image_size=512,
     )
     
     return train_loader, val_loader, test_loader
+
+def create_vis_dataloader(root_dir, image_size, num_workers, use_nir):
+    """创建专用的可视化数据加载器"""
+    vis_dir = os.path.join(root_dir, 'Vis')
+    
+    if not os.path.exists(vis_dir):
+        print(f"警告: 未找到可视化数据集目录 {vis_dir}。")
+        return None
+        
+    vis_transform = get_val_augmentations(image_size, use_nir)
+    
+    # 注意：这里的 root_dir 是数据集的根目录，split='Vis'
+    vis_dataset = BuildingSegmentationDataset(
+        root_dir=root_dir, 
+        split='Vis', 
+        transform=vis_transform,
+        use_nir=use_nir
+    )
+    
+    vis_loader = DataLoader(
+        vis_dataset,
+        batch_size=1, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=True
+    )
+    
+    print(f"可视化数据加载器创建成功，从 {vis_dir} 加载了 {len(vis_dataset)} 个样本。")
+    return vis_loader

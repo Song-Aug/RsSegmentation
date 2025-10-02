@@ -88,11 +88,11 @@ def create_hdnet_sample_images(model, val_loader, device, epoch, num_samples=4):
     return fig
 
 
-def create_sample_images(model, val_loader, device, epoch, num_samples=4):
+def create_sample_images(model, vis_loader, device, epoch, num_samples=4):
     model.eval()
     figures = []
     with torch.no_grad():
-        for batch_idx, batch in enumerate(val_loader):
+        for batch_idx, batch in enumerate(vis_loader):
             if batch_idx >= num_samples:
                 break
             images = batch['image'].to(device)

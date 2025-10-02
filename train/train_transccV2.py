@@ -15,14 +15,14 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
 from configs.transcc_v2_config import config
-from utils.data_process import create_dataloaders
-from utils.metrics import SegmentationMetrics
+from utils4train.data_process import create_dataloaders, create_vis_dataloader
+from utils4train.metrics import SegmentationMetrics
 from models.TransCCV2 import create_transcc_v2
-from utils.checkpoint import save_checkpoint
-from utils.losses import transcc_v2_loss
-from utils.trainer import test
-from utils.visualization import create_sample_images
-from utils.alerts_by_lark import send_message
+from utils4train.checkpoint import save_checkpoint
+from utils4train.losses import transcc_v2_loss
+from utils4train.trainer import test
+from utils4train.visualization import create_sample_images
+from utils4train.alerts_by_lark import send_message
 
 
 def set_seed(seed: int) -> None:
@@ -149,6 +149,14 @@ def main():
             augment=True,
             use_nir=config["use_nir"],
         )
+        vis_loader = create_vis_dataloader(
+            root_dir=config["data_root"],
+            image_size=config["image_size"],
+            num_workers=config["num_workers"],
+            use_nir=config["use_nir"]
+        )
+        if vis_loader is None:
+            vis_loader = val_loader
 
         # 模型初始化
         model = create_transcc_v2(
@@ -277,15 +285,14 @@ def main():
                 f"lr: {optimizer.param_groups[0]['lr']:.6g}"
             )
 
-            if (epoch + 1) % 10 == 0:
-                figures = create_sample_images(model, val_loader, device, epoch + 1)
-                log_images = {
-                    f"Example_Images/epoch_{epoch+1}_sample_{idx}": wandb.Image(fig)
-                    for idx, fig in enumerate(figures)
-                }
-                wandb.log(log_images)
-                for fig in figures:
-                    plt.close(fig)
+            # 每20个epoch保存一次可视化结果
+            if (epoch + 1) % 1 == 0:
+                figures_log = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
+                if figures_log:
+                    log_item = figures_log[0] 
+                    for key, fig in log_item.items():
+                        wandb.log({key: wandb.Image(fig)})
+                        plt.close(fig)
 
             if val_result["iou"] > best_iou:
                 best_iou = val_result["iou"]
@@ -300,7 +307,7 @@ def main():
                         content=f"Epoch: {best_epoch}\nVal IoU: {best_iou:.4f}\nCur lr: {optimizer.param_groups[0]['lr']:.6g}",
                     )
 
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 10 == 0 and epoch > 100:
                 checkpoint_path = os.path.join(
                     checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth"
                 )
