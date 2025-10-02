@@ -3,6 +3,7 @@
 /checkpoints
 /pretrained_weights
 /swanlog
+/wandb
 /.venv
 
 **/nohup.out
