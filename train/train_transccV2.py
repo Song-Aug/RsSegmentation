@@ -171,7 +171,7 @@ def main():
         wandb.watch(model, log="all", log_freq=100)
 
         # 加载ViT预训练权重
-        from utils.weights import load_pretrained_weights
+        from utils4train.weights import load_pretrained_weights
         pretrained_path = config.get("pretrained_weights", None)
         fusion_strategy = config.get("fusion_strategy", "interpolate")
         if pretrained_path:
@@ -285,23 +285,19 @@ def main():
                 f"lr: {optimizer.param_groups[0]['lr']:.6g}"
             )
 
-            # 每20个epoch保存一次可视化结果
-            if (epoch + 1) % 1 == 0:
-                figures_log = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
-                if figures_log:
-                    log_item = figures_log[0] 
-                    for key, fig in log_item.items():
-                        wandb.log({key: wandb.Image(fig)})
-                        plt.close(fig)
+            # 每10个epoch保存一次可视化结果
+            if (epoch + 1) % 10 == 0:
+                figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
+                if figure:
+                    wandb.log({"Prediction_Summary": wandb.Image(figure)})
+                    plt.close(figure)
 
             if val_result["iou"] > best_iou:
                 best_iou = val_result["iou"]
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                logging.info(
-                    f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}"
-                )
-                if best_iou > 0.75:
+                logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
+                if best_iou > 0.73:
                     send_message(
                         title=f"{experiment_name}：模型最佳指标更新",
                         content=f"Epoch: {best_epoch}\nVal IoU: {best_iou:.4f}\nCur lr: {optimizer.param_groups[0]['lr']:.6g}",

@@ -153,8 +153,7 @@ def create_vis_dataloader(root_dir, image_size, num_workers, use_nir):
         return None
         
     vis_transform = get_val_augmentations(image_size, use_nir)
-    
-    # 注意：这里的 root_dir 是数据集的根目录，split='Vis'
+
     vis_dataset = BuildingSegmentationDataset(
         root_dir=root_dir, 
         split='Vis', 
@@ -169,6 +168,5 @@ def create_vis_dataloader(root_dir, image_size, num_workers, use_nir):
         num_workers=num_workers,
         pin_memory=True
     )
-    
-    print(f"可视化数据加载器创建成功，从 {vis_dir} 加载了 {len(vis_dataset)} 个样本。")
+
     return vis_loader

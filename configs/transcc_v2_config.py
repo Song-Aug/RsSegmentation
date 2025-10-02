@@ -18,7 +18,7 @@ config = {
     'save_dir': './runs',
     'model_name': 'TransCC_V2',
     'num_classes': 2,
-    'seed': 42,
+    'seed': 3047,
     'warmup_epochs': 5,
     'min_lr': 1e-6
 }
