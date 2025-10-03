@@ -213,14 +213,17 @@ def hdnet_loss(outputs, labels, weights=None):
     
     return total_loss, main_seg_loss, main_bd_loss
 
-
 def mssdmpanet_y_bce_loss(pred1, pred2, pred3, pred4, pred5, y):
-    bce = nn.BCELoss()
-    loss1 = bce(pred1, F.interpolate(y, size=pred1.shape[2:], mode='nearest'))
-    loss2 = bce(pred2, F.interpolate(y, size=pred2.shape[2:], mode='nearest'))
-    loss3 = bce(pred3, F.interpolate(y, size=pred3.shape[2:], mode='nearest'))
-    loss4 = bce(pred4, F.interpolate(y, size=pred4.shape[2:], mode='nearest'))
-    loss5 = bce(pred5, F.interpolate(y, size=pred5.shape[2:], mode='nearest'))
+    """
+    MSSDMPA-Net的多尺度损失函数。
+    更新：使用BCEWithLogitsLoss以提高数值稳定性。
+    """
+    bce_with_logits = nn.BCEWithLogitsLoss()
+    loss1 = bce_with_logits(pred1, F.interpolate(y, size=pred1.shape[2:], mode='nearest'))
+    loss2 = bce_with_logits(pred2, F.interpolate(y, size=pred2.shape[2:], mode='nearest'))
+    loss3 = bce_with_logits(pred3, F.interpolate(y, size=pred3.shape[2:], mode='nearest'))
+    loss4 = bce_with_logits(pred4, F.interpolate(y, size=pred4.shape[2:], mode='nearest'))
+    loss5 = bce_with_logits(pred5, F.interpolate(y, size=pred5.shape[2:], mode='nearest'))
     return loss1 + loss2 + loss3 + loss4 + loss5
 
 class MSSDMPA_IoU(object):
@@ -228,7 +231,10 @@ class MSSDMPA_IoU(object):
         self.threshold = threshold
 
     def __call__(self, y_true, y_pred):
-        y_pred = (y_pred > self.threshold).float()
+        # y_pred是logits，需要先经过sigmoid
+        y_pred_probs = torch.sigmoid(y_pred)
+        y_pred = (y_pred_probs > self.threshold).float()
+        
         intersection = torch.sum(y_true * y_pred)
         union = torch.sum(y_true) + torch.sum(y_pred) - intersection
         iou = (intersection + 1e-7) / (union + 1e-7)
@@ -237,8 +243,11 @@ class MSSDMPA_IoU(object):
         return [recall, precision, iou, iou]
 
 def mssdmpanet_dice_coeff(y_true, y_pred):
+    """
+    y_pred是logits，需要先经过sigmoid
+    """
     smooth = 1.
     y_true_f = y_true.flatten()
-    y_pred_f = y_pred.flatten()
+    y_pred_f = torch.sigmoid(y_pred).flatten() # 应用sigmoid
     intersection = torch.sum(y_true_f * y_pred_f)
     return (2. * intersection + smooth) / (torch.sum(y_true_f) + torch.sum(y_pred_f) + smooth)
