@@ -50,7 +50,7 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
         optimizer.zero_grad()
         outputs = model(images)
         loss, seg_loss, boundary_loss = transcc_v2_loss(
-            outputs, labels, seg_weight=1.0, boundary_weight=1.0, aux_weight=0.4
+            outputs, labels, seg_weight=1.0, boundary_weight=1.5, aux_weight=0.4
         )
         loss.backward()
         optimizer.step()
@@ -196,7 +196,7 @@ def main():
         )
         warmup_scheduler = LinearLR(
             optimizer,
-            start_factor=0.1,
+            start_factor=0.01,
             end_factor=1.0,
             total_iters=config["warmup_epochs"],
         )

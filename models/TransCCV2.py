@@ -67,10 +67,6 @@ class ConvBlock(nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
-# +---------------------------------------------------------------------------+
-# | Attention Modules (CBAM)                                                  |
-# +---------------------------------------------------------------------------+
-
 class ChannelAttention(nn.Module):
     """CBAM 中的通道注意力模块"""
     def __init__(self, in_planes, ratio=16):
@@ -149,9 +145,6 @@ class CBAMResidualBlock(nn.Module):
         return out
 
 
-# +---------------------------------------------------------------------------+
-# | Transformer Encoder Components                                            |
-# +---------------------------------------------------------------------------+
 
 class TransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
@@ -235,8 +228,6 @@ class Encoder(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         
-        # --- FIX START ---
-        # 使用关键字参数以避免位置参数混淆
         self.blocks = nn.ModuleList([
             TransformerBlock(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
@@ -244,7 +235,6 @@ class Encoder(nn.Module):
             )
             for i in range(depth)
         ])
-        # --- FIX END ---
         
         self.norm = norm_layer(embed_dim)
         self.apply(self._init_weights)
@@ -282,10 +272,6 @@ class Encoder(nn.Module):
         
         return self.norm(x), layer_features
 
-
-# +---------------------------------------------------------------------------+
-# | Decoder Helper Modules                                                    |
-# +---------------------------------------------------------------------------+
 
 class SkipConnection(nn.Module):
     """跳级连接模块，用于融合编码器和解码器特征"""
@@ -369,10 +355,6 @@ class ASPP(nn.Module):
         return self.dropout(x)
 
 
-# +---------------------------------------------------------------------------+
-# | Core V2 Decoder and Model Definition                                      |
-# +---------------------------------------------------------------------------+
-
 class DecoderV2(nn.Module):
     """TransCC V2 decoder with multi-scale supervision and boundary heads."""
     def __init__(self, embed_dim: int = 768, patch_size: int = 16, img_size: int = 512,
@@ -411,12 +393,15 @@ class DecoderV2(nn.Module):
         self.final_proj = ASPP(decoder_channels[3], decoder_channels[3] // 2)
         self.seg_head_main = nn.Conv2d(decoder_channels[3] // 2, num_classes, 1)
         self.boundary_head_aux = nn.Sequential(ConvBlock(decoder_channels[2], decoder_channels[2] // 2), nn.Conv2d(decoder_channels[2] // 2, 1, 1))
+        
+        # --- 强化的边界预测头 ---
         self.boundary_head_main = nn.Sequential(
-            nn.Conv2d(decoder_channels[3] // 2, decoder_channels[3] // 4, 3, padding=1, bias=False),
-            nn.BatchNorm2d(decoder_channels[3] // 4),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(decoder_channels[3] // 4, 1, 1)
+            ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4, kernel_size=3),
+            CBAM(decoder_channels[3] // 4),
+            ConvBlock(decoder_channels[3] // 4, decoder_channels[3] // 8, kernel_size=3),
+            nn.Conv2d(decoder_channels[3] // 8, 1, 1)
         )
+
         self.dropout = nn.Dropout(p=0.1)
         self._init_weights()
 

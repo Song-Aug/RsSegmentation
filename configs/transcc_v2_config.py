@@ -19,6 +19,6 @@ config = {
     'model_name': 'TransCC_V2',
     'num_classes': 2,
     'seed': 3047,
-    'warmup_epochs': 5,
+    'warmup_epochs': 10,
     'min_lr': 1e-6
 }

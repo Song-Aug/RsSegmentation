@@ -1,0 +1,1 @@
+nohup python train/train_transccV2.py > /dev/null 2>&1 &
