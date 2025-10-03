@@ -213,10 +213,20 @@ def main():
 
         logging.info(f"实验开始: {experiment_name}")
         logging.info(f"模型: {config['model_name']}, 总参数: {total_params:,}, 可训练参数: {trainable_params:,}")
-        send_message(title=f"实验开始: {experiment_name}", content=f"模型: {config['model_name']}\n总参数: {total_params:,}")
+        send_message(
+            title=f"实验开始: {experiment_name}",
+            content=(
+                f"模型: {config['model_name']}\n"
+                f"总参数: {total_params:,}\n"
+                f"可训练参数: {trainable_params:,}\n"
+                f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"训练轮数: {config['num_epochs']}\n"
+                f"学习率: {config['learning_rate']}\n"
+            )
+        )
 
         # 训练循环
-        best_iou = 0.0
+        best_iou,report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
 
@@ -257,19 +267,25 @@ def main():
                     plt.close(figure)
 
             if val_result["iou"] > best_iou:
+                if val_result["iou"] > 0.73 and val_result["iou"] - report_iou > 0.01:
+                    report_iou = val_result["iou"]
+                    send_message(
+                        title=f"{experiment_name}：模型最佳指标更新",
+                        content=(
+                            f"Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                            f"Epoch: {best_epoch}\n"
+                            f"Val IoU: {report_iou:.4f}\n"
+                            f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
+                        ),
+                    )
                 best_iou = val_result["iou"]
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
                 logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
-                if best_iou > 0.73:
-                    send_message(
-                        title=f"{experiment_name}：模型最佳指标更新",
-                        content=f"Epoch: {best_epoch}\nVal IoU: {best_iou:.4f}\nCur lr: {optimizer.param_groups[0]['lr']:.6g}",
-                    )
             
-            if (epoch + 1) % 20 == 0 and epoch > 100:
-                 checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth")
-                 save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
+            if (epoch + 1) % 10 == 0 and epoch > 100:
+                checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth")
+                save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
 
         wandb.summary["best_iou"] = best_iou
         wandb.summary["best_epoch"] = best_epoch
