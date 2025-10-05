@@ -314,7 +314,7 @@ class FeatureAggregator(nn.Module):
 
 class ASPP(nn.Module):
     """Atrous Spatial Pyramid Pooling (ASPP) module."""
-    def __init__(self, in_channels, out_channels, rates=[6, 12, 18]):
+    def __init__(self, in_channels, out_channels, rates=[3, 6, 12, 18]):
         super(ASPP, self).__init__()
         self.aspp_convs = nn.ModuleList([
             nn.Sequential(

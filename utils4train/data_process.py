@@ -39,6 +39,29 @@ def get_train_augmentations(image_size=512, use_nir=False):
         ToTensorV2(),
     ])
 
+def get_mild_augmentations(image_size=512, use_nir=False):
+    """为训练后期创建温和的数据增强管道"""
+    mean = [0.485, 0.456, 0.406, 0.5] if use_nir else [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225, 0.25] if use_nir else [0.229, 0.224, 0.225]
+    
+    return A.Compose([
+        A.Resize(image_size, image_size, interpolation=Image.BILINEAR),
+        
+        # 只保留基础的几何变换
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
+
+        # 可以保留轻微的颜色增强
+        A.RandomBrightnessContrast(p=0.2),
+        
+        # 移除了 ElasticTransform, GridDistortion, CoarseDropout 等强力增强
+        
+        # 归一化和转换为Tensor
+        A.Normalize(mean=mean, std=std),
+        ToTensorV2(),
+    ])
+
 def get_val_augmentations(image_size=512, use_nir=False):
     mean = [0.485, 0.456, 0.406, 0.5] if use_nir else [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225, 0.25] if use_nir else [0.229, 0.224, 0.225]

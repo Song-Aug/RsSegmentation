@@ -5,6 +5,7 @@
 /swanlog
 /wandb
 /.venv
+/logs
 
 **/nohup.out
 

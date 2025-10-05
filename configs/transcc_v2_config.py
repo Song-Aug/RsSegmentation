@@ -12,9 +12,10 @@ config = {
     'attn_drop_rate': 0.1,
     'drop_path_rate': 0.15,
 
-    'num_epochs': 300,
+    'num_epochs': 500,
+    'mild_aug_epoch': 400,
     'learning_rate': 5e-4,
-    'weight_decay': 5e-4,
+    'weight_decay': 1e-3,
     'save_dir': './runs',
     'model_name': 'TransCC_V2',
     'num_classes': 2,

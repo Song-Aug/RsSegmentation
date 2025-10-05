@@ -272,7 +272,7 @@ def main():
                     send_message(
                         title=f"{experiment_name}：模型最佳指标更新",
                         content=(
-                            f"Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                             f"Epoch: {best_epoch}\n"
                             f"Val IoU: {report_iou:.4f}\n"
                             f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
