@@ -12,11 +12,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.cuda.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
 from configs.transcc_v2_config import config
-from utils4train.data_process import create_dataloaders, create_vis_dataloader
+from utils4train.data_process import *
 from utils4train.metrics import SegmentationMetrics
 from models.TransCCV2 import create_transcc_v2
 from utils4train.checkpoint import save_checkpoint
@@ -36,7 +37,7 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
+def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch, scaler):
     model.train()
     total_loss = 0.0
     seg_loss_total = 0.0
@@ -49,12 +50,15 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
         labels = batch["label"].to(device)
 
         optimizer.zero_grad()
-        outputs = model(images)
-        loss, seg_loss, boundary_loss = transcc_v2_loss(
-            outputs, labels, seg_weight=1.0, boundary_weight=1.3, aux_weight=0.4
-        )
-        loss.backward()
-        optimizer.step()
+        with autocast():
+            outputs = model(images)
+            loss, seg_loss, boundary_loss = transcc_v2_loss(
+                outputs, labels, seg_weight=1.0, boundary_weight=1.3, aux_weight=0.4
+            )
+        
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         total_loss += loss.item()
         seg_loss_total += seg_loss.item()
@@ -95,8 +99,9 @@ def validate(model, val_loader, device, metrics, epoch):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            outputs = model(images)
-            loss, seg_loss, boundary_loss = transcc_v2_loss(outputs, labels)
+            with autocast():
+                outputs = model(images)
+                loss, seg_loss, boundary_loss = transcc_v2_loss(outputs, labels)
 
             total_loss += loss.item()
             seg_loss_total += seg_loss.item()
@@ -230,6 +235,7 @@ def main():
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[config["warmup_epochs"]],
         )
+        scaler = GradScaler()
 
         # 初始化评价指标
         train_metrics = SegmentationMetrics(config["num_classes"])
@@ -276,7 +282,7 @@ def main():
         for epoch in range(config["num_epochs"]):
             train_loader = train_loader_mild if epoch + 1 > config['mild_aug_epoch'] else train_loader_strong
             train_total, train_seg, train_bd, train_result = train_one_epoch(
-                model, train_loader, optimizer, device, train_metrics, epoch + 1
+                model, train_loader, optimizer, device, train_metrics, epoch + 1, scaler=scaler
             )
 
             val_total, val_seg, val_bd, val_result = validate(
