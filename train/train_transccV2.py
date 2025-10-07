@@ -142,7 +142,7 @@ def main():
         name=experiment_name,
         config=config,
         notes="TransCCV2建筑物分割实验",
-        tags=["TransCCV2", "building-segmentation", "RGB"],
+        tags=["TransCCV2", "building-segmentation", "RGB", "KernelSize5"],
     )
 
     try:
@@ -337,11 +337,11 @@ def main():
                     send_message(
                         title=f"{experiment_name}：模型最佳指标更新",
                         content=(
-                            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
                             f"Epoch: {best_epoch}\n"
                             f"Val IoU: {report_iou:.4f}\n"
                             f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
-                            f"预计结束时间: {eta_time.strftime('%Y-%m-%d %H:%M')}\n"
+                            f"预计结束时间: {eta_time.strftime('%Y-%m-%d %H:%M')}"
                         ),
                     )
                 best_iou = val_result["iou"]
@@ -365,10 +365,10 @@ def main():
         test_result = test(model, test_loader, device, test_metrics)
         wandb.log(
             {
-                "test/iou": test_result["iou"],
-                "test/precision": test_result["precision"],
-                "test/recall": test_result["recall"],
-                "test/f1": test_result["f1"],
+                "Result Board/IoU": test_result["iou"],
+                "Result Board/F1": test_result["f1"],
+                "Result Board/Precision": test_result["precision"],
+                "Result Board/Recall": test_result["recall"]
             }
         )
         logging.info(

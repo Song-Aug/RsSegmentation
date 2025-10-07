@@ -1,1 +1,1 @@
-nohup python train/train_transccV2.py > logs/train_transccV2_nopretrain.log 2>&1 &
+nohup python train/train_transccV2.py > logs/train_transccV2_kernel.log 2>&1 &

@@ -66,7 +66,7 @@ class FocalLoss(nn.Module):
             return loss
 
 
-def generate_boundary_and_weight_maps(labels, kernel_size=3, w0=10, sigma=5):
+def generate_boundary_and_weight_maps(labels, kernel_size=5, w0=10, sigma=5):
     """
     从分割标签动态生成边界标签和像素权重图。
     Args:

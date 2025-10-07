@@ -6,7 +6,7 @@ config = {
     'image_size': 512,
     'input_channels': 3,
     'use_nir': False,
-    # 'pretrained_weights': './pretrained_weights/vit_base_patch16_224.pth',
+    'pretrained_weights': './pretrained_weights/vit_base_patch16_224.pth',
     'fusion_strategy': 'interpolate',
     'drop_rate': 0.1,
     'attn_drop_rate': 0.1,
