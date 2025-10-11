@@ -1,18 +1,27 @@
-# -*- coding: utf-8 -*-
-# 配置实验参数
 config = {
-    'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
-    'batch_size': 6,
-    'num_workers': 4,
-    'image_size': 512,
-    'input_channels': 3,  # RGB
-    'use_nir': False,
-    'num_epochs': 300,
-    'learning_rate': 0.001,
-    'weight_decay': 1e-4,
-    'save_dir': './runs',
-    'model_name': 'hdnet_3bands',
-    'base_channel': 48,
-    'num_classes': 2,
-    'seed': 42
+    # --- Project & Experiment Info ---
+    "project_name": "Building-Segmentation-3Bands",
+    "model_name": "HDNet",
+    "description": "HDNet model for 3-band building segmentation with W&B logging.",
+    "tags": ["HDNet", "building-segmentation", "RGB", "high-resolution"],
+    # --- Data Paths & Settings ---
+    "data_root": "/Users/song/Downloads/3BandsSample",
+    "image_size": 512,
+    "input_channels": 3,
+    "use_nir": False,
+    "num_classes": 2,
+    # --- Training Hyperparameters ---
+    "batch_size": 6,
+    "num_workers": 4,
+    "num_epochs": 300,
+    "seed": 42,
+    # --- Optimizer & Scheduler Params (Upgraded) ---
+    "learning_rate": 1e-3,
+    "weight_decay": 1e-4,
+    "warmup_epochs": 1,
+    "min_lr": 1e-6,
+    # --- Model Specific ---
+    "base_channel": 48,
+    # --- System ---
+    "save_dir": "./runs",
 }

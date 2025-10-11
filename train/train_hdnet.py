@@ -1,32 +1,47 @@
 import os
 import sys
+import logging
+import random
+from datetime import datetime, timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
-from datetime import datetime
+from torch.cuda.amp import GradScaler, autocast
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
-import swanlab
+import wandb
 import matplotlib.pyplot as plt
 
-from models.HDNet import HDNet
-from utils.data_process import create_dataloaders
-from utils.metrics import SegmentationMetrics
+# 导入项目模块
 from configs.hdnet_config import config
-from utils.losses import hdnet_loss
-from utils.checkpoint import save_checkpoint
-from utils.visualization import create_hdnet_sample_images
-from utils.trainer import test
+from models.HDNet import HDNet
+from utils4train.data_process import create_dataloaders, create_vis_dataloader
+from utils4train.metrics import SegmentationMetrics
+from utils4train.losses import hdnet_loss
+from utils4train.checkpoint import save_checkpoint
+from utils4train.visualization import create_hdnet_sample_images
+from utils4train.trainer import test  # 假设 test 函数在 trainer.py 中
+from utils4train.alerts_by_lark import send_message
 
 
-def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
+def set_seed(seed: int) -> None:
+    """设置随机种子以确保实验可复现"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch, scaler):
     model.train()
-    total_loss = 0
-    total_seg_loss = 0
-    total_bd_loss = 0
     metrics.reset()
+    loss_meter = {"total": 0.0, "seg": 0.0, "bd": 0.0}
 
     pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}")
     for batch_idx, batch in enumerate(pbar):
@@ -35,52 +50,43 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch):
 
         optimizer.zero_grad()
 
-        # 前向传播
-        outputs = model(images)
+        with autocast():
+            outputs = model(images)
+            total_loss_batch, seg_loss_batch, bd_loss_batch = hdnet_loss(
+                outputs, labels
+            )
 
-        # 计算损失
-        total_loss_batch, seg_loss_batch, bd_loss_batch = hdnet_loss(outputs, labels)
+        scaler.scale(total_loss_batch).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-        # 反向传播
-        total_loss_batch.backward()
-        optimizer.step()
+        loss_meter["total"] += total_loss_batch.item()
+        loss_meter["seg"] += seg_loss_batch.item()
+        loss_meter["bd"] += bd_loss_batch.item()
 
-        total_loss += total_loss_batch.item()
-        total_seg_loss += seg_loss_batch.item()
-        total_bd_loss += bd_loss_batch.item()
+        x_seg = outputs[0]
+        preds = torch.argmax(x_seg, dim=1).cpu().numpy()
+        targets = labels.cpu().numpy()
+        metrics.update(preds, targets)
 
-        # 计算指标（使用主分割输出）
-        x_seg = outputs[0]  # 主分割输出
-        pred = torch.argmax(x_seg, dim=1).cpu().numpy()
-        target = labels.cpu().numpy()
-        # 确保target在[0,1]范围内
-        target = np.clip(target, 0, 1)
-        metrics.update(pred, target)
-
-        # 更新进度条
         pbar.set_postfix(
             {
-                "Total Loss": f"{total_loss_batch.item():.4f}",
-                "Seg Loss": f"{seg_loss_batch.item():.4f}",
-                "BD Loss": f"{bd_loss_batch.item():.4f}",
-                "Avg Loss": f"{total_loss/(batch_idx+1):.4f}",
+                "Total": f"{total_loss_batch.item():.4f}",
+                "Seg": f"{seg_loss_batch.item():.4f}",
+                "BD": f"{bd_loss_batch.item():.4f}",
+                "IoU": f"{metrics.get_metrics()['iou']:.4f}",
             }
         )
 
-    avg_total_loss = total_loss / len(train_loader)
-    avg_seg_loss = total_seg_loss / len(train_loader)
-    avg_bd_loss = total_bd_loss / len(train_loader)
-    train_metrics = metrics.get_metrics()
-
-    return avg_total_loss, avg_seg_loss, avg_bd_loss, train_metrics
+    avg_losses = {k: v / len(train_loader) for k, v in loss_meter.items()}
+    train_metrics_results = metrics.get_metrics()
+    return avg_losses, train_metrics_results
 
 
 def validate(model, val_loader, device, metrics, epoch):
     model.eval()
-    total_loss = 0
-    total_seg_loss = 0
-    total_bd_loss = 0
     metrics.reset()
+    loss_meter = {"total": 0.0, "seg": 0.0, "bd": 0.0}
 
     with torch.no_grad():
         pbar = tqdm(val_loader, desc=f"Validation Epoch {epoch}")
@@ -88,73 +94,45 @@ def validate(model, val_loader, device, metrics, epoch):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            # 前向传播
-            outputs = model(images)
+            with autocast():
+                outputs = model(images)
+                total_loss_batch, seg_loss_batch, bd_loss_batch = hdnet_loss(
+                    outputs, labels
+                )
 
-            # 计算损失
-            total_loss_batch, seg_loss_batch, bd_loss_batch = hdnet_loss(
-                outputs, labels
-            )
+            loss_meter["total"] += total_loss_batch.item()
+            loss_meter["seg"] += seg_loss_batch.item()
+            loss_meter["bd"] += bd_loss_batch.item()
 
-            total_loss += total_loss_batch.item()
-            total_seg_loss += seg_loss_batch.item()
-            total_bd_loss += bd_loss_batch.item()
+            x_seg = outputs[0]
+            preds = torch.argmax(x_seg, dim=1).cpu().numpy()
+            targets = labels.cpu().numpy()
+            metrics.update(preds, targets)
 
-            # 计算指标（使用主分割输出）
-            x_seg = outputs[0]  # 主分割输出
-            pred = torch.argmax(x_seg, dim=1).cpu().numpy()
-            target = labels.cpu().numpy()
-            # 确保target在[0,1]范围内
-            target = np.clip(target, 0, 1)
-            metrics.update(pred, target)
-
-            # 更新进度条
             pbar.set_postfix(
                 {
-                    "Total Loss": f"{total_loss_batch.item():.4f}",
-                    "Seg Loss": f"{seg_loss_batch.item():.4f}",
-                    "BD Loss": f"{bd_loss_batch.item():.4f}",
-                    "Avg Loss": f"{total_loss/(batch_idx+1):.4f}",
+                    "Total": f"{total_loss_batch.item():.4f}",
+                    "IoU": f"{metrics.get_metrics()['iou']:.4f}",
                 }
             )
 
-    avg_total_loss = total_loss / len(val_loader)
-    avg_seg_loss = total_seg_loss / len(val_loader)
-    avg_bd_loss = total_bd_loss / len(val_loader)
-    val_metrics = metrics.get_metrics()
-
-    return avg_total_loss, avg_seg_loss, avg_bd_loss, val_metrics
+    avg_losses = {k: v / len(val_loader) for k, v in loss_meter.items()}
+    val_metrics_results = metrics.get_metrics()
+    return avg_losses, val_metrics_results
 
 
 def main():
-    # 设置随机种子确保实验可重现
-    seed = config["seed"]
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # 如果使用多GPU
-    np.random.seed(seed)
-    import random
-
-    random.seed(seed)
-
-    # 设置确定性算法（可选，但会影响性能）
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    # 初始化SwanLab实验看板
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
-    swanlab.init(
-        project="Building-Segmentation-3Bands",
-        experiment_name=experiment_name,
-        config=config,
-        description="HDNet模型用于3波段建筑物分割实验",
-        tags=["HDNet", "building-segmentation", "RGB", "high-resolution"],
-        device="cuda" if torch.cuda.is_available() else "cpu",
-    )
-
-    # 设置设备
+    set_seed(config["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+
+    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
+    wandb.init(
+        project=config["project_name"],
+        name=experiment_name,
+        config=config,
+        notes=config["description"],
+        tags=config["tags"],
+    )
 
     try:
         # 数据加载
@@ -166,177 +144,196 @@ def main():
             augment=True,
             use_nir=config["use_nir"],
         )
-
-        # 记录数据集信息到SwanLab
-        swanlab.log(
-            {
-                "dataset/train_batches": swanlab.Text(str(len(train_loader))),
-                "dataset/val_batches": swanlab.Text(str(len(val_loader))),
-                "dataset/test_batches": swanlab.Text(str(len(test_loader))),
-                "dataset/train_samples": swanlab.Text(
-                    str(len(train_loader) * config["batch_size"])
-                ),
-                "dataset/val_samples": swanlab.Text(
-                    str(len(val_loader) * config["batch_size"])
-                ),
-                "dataset/test_samples": swanlab.Text(
-                    str(len(test_loader) * config["batch_size"])
-                ),
-            }
+        vis_loader = create_vis_dataloader(
+            root_dir=config["data_root"],
+            image_size=config["image_size"],
+            num_workers=config["num_workers"],
+            use_nir=config["use_nir"],
         )
+        if vis_loader is None:
+            vis_loader = val_loader
 
-        # 创建模型并记录模型信息
+        # 模型初始化
         model = HDNet(
             base_channel=config["base_channel"], num_classes=config["num_classes"]
-        )
-        model = model.to(device)
+        ).to(device)
+        wandb.watch(model, log="all", log_freq=100)
 
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Total parameters: {total_params:,}")
-        print(f"Trainable parameters: {trainable_params:,}")
-
-        swanlab.log(
+        wandb.config.update(
             {
-                "model/total_params": swanlab.Text(str(total_params)),
-                "model/trainable_params": swanlab.Text(str(trainable_params)),
-                "model/base_channel": swanlab.Text(str(config["base_channel"])),
-                "model/input_channels": swanlab.Text(str(config["input_channels"])),
+                "model_total_params": total_params,
+                "model_trainable_params": trainable_params,
             }
         )
 
-        # 优化器
+        # 优化器和学习率调度器 (升级版)
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config["learning_rate"],
             weight_decay=config["weight_decay"],
         )
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=config["num_epochs"]
+        warmup_scheduler = LinearLR(
+            optimizer, start_factor=0.01, total_iters=config["warmup_epochs"]
         )
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=config["num_epochs"] - config["warmup_epochs"],
+            eta_min=config["min_lr"],
+        )
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[config["warmup_epochs"]],
+        )
+        scaler = GradScaler()
 
-        # 定义指标计算类
+        # 初始化指标计算类
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
         test_metrics = SegmentationMetrics(config["num_classes"])
 
-        # 创建检查点保存目录
-        checkpoint_dir = f"./checkpoints/{experiment_name}"
+        # 创建检查点目录和日志
+        checkpoint_dir = os.path.join("./checkpoints", experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s: %(message)s",
+            handlers=[
+                logging.FileHandler(os.path.join(checkpoint_dir, "train_log.txt")),
+                logging.StreamHandler(),
+            ],
+        )
 
-        # 训练循环
-        best_iou = 0
-        best_epoch = 0
+        logging.info(f"实验开始: {experiment_name}")
+        start_time = datetime.now()
+        send_message(
+            title=f"实验开始: {experiment_name}",
+            content=(
+                f"开始时间: {start_time.strftime('%Y-%m-%d %H:%M')}\n"
+                f"模型: {config['model_name']}\n"
+                f"总参数: {total_params:,}\n"
+                f"可训练参数: {trainable_params:,}\n"
+                f"训练轮数: {config['num_epochs']}\n"
+                f"学习率: {config['learning_rate']}\n"
+            ),
+        )
+
+        # --- 训练循环 ---
+        best_iou = 0.0
+        best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
+        start_time = datetime.now()
 
         for epoch in range(config["num_epochs"]):
-            # 记录学习率到SwanLab
-            swanlab.log({"train/learning_rate": optimizer.param_groups[0]["lr"]})
-
-            # 训练
-            train_total_loss, train_seg_loss, train_bd_loss, train_result = (
-                train_one_epoch(
-                    model, train_loader, optimizer, device, train_metrics, epoch + 1
-                )
+            train_losses, train_result = train_one_epoch(
+                model, train_loader, optimizer, device, train_metrics, epoch + 1, scaler
             )
-
-            # 验证
-            val_total_loss, val_seg_loss, val_bd_loss, val_result = validate(
+            val_losses, val_result = validate(
                 model, val_loader, device, val_metrics, epoch + 1
             )
-
-            # 更新学习率
             scheduler.step()
 
-            # 记录训练和验证指标到SwanLab
-            swanlab.log(
+            wandb.log(
                 {
-                    "train/total_loss": train_total_loss,
-                    "train/seg_loss": train_seg_loss,
-                    "train/bd_loss": train_bd_loss,
-                    "train/iou": train_result["iou"],
-                    "train/precision": train_result["precision"],
-                    "train/recall": train_result["recall"],
-                    "train/f1": train_result["f1"],
-                    "val/total_loss": val_total_loss,
-                    "val/seg_loss": val_seg_loss,
-                    "val/bd_loss": val_bd_loss,
-                    "val/iou": val_result["iou"],
-                    "val/precision": val_result["precision"],
-                    "val/recall": val_result["recall"],
-                    "val/f1": val_result["f1"],
+                    "Comparison Board/IoU": val_result["iou"],
+                    "Comparison Board/F1": val_result["f1"],
+                    "Comparison Board/Precision": val_result["precision"],
+                    "Comparison Board/Recall": val_result["recall"],
+                    "Train_info/Loss/Train": train_losses["total"],
+                    "Train_info/Loss/Val": val_losses["total"],
+                    "Train_info/Seg_Loss/Train": train_losses["seg"],
+                    "Train_info/Seg_Loss/Val": val_losses["seg"],
+                    "Train_info/Boundary_Loss/Train": train_losses["bd"],
+                    "Train_info/Boundary_Loss/Val": val_losses["bd"],
+                    "Train_info/IoU/Train": train_result["iou"],
+                    "Train_info/IoU/Val": val_result["iou"],
+                    "Train_info/F1/Train": train_result["f1"],
+                    "Train_info/F1/Val": val_result["f1"],
+                    "Train_info/Learning_Rate": optimizer.param_groups[0]["lr"],
                 }
             )
+            logging.info(
+                f"Epoch {epoch+1} | Train Loss: {train_losses['total']:.4f}, Train IoU: {train_result['iou']:.4f} | Val Loss: {val_losses['total']:.4f}, Val IoU: {val_result['iou']:.4f}"
+            )
 
-            # 每10个epoch创建样本图像
             if (epoch + 1) % 10 == 0:
                 sample_figure = create_hdnet_sample_images(
-                    model, val_loader, device, epoch + 1
+                    model, vis_loader, device, epoch + 1, num_samples=4
                 )
-                swanlab.log({"Example_Images": swanlab.Image(sample_figure)})
-                plt.close(sample_figure)  # 关闭figure释放内存
+                wandb.log({"Prediction Summary": wandb.Image(sample_figure)})
+                plt.close(sample_figure)
 
-            # 保存最佳模型
             if val_result["iou"] > best_iou:
+                if val_result["iou"] > 0.73 and val_result["iou"] - report_iou > 0.01:
+                    report_iou = val_result["iou"]
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    eta_seconds = (elapsed / (epoch + 1)) * (
+                        config["num_epochs"] - (epoch + 1)
+                    )
+                    eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+                    send_message(
+                        title=f"{experiment_name}：模型最佳指标更新",
+                        content=(
+                            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                            f"Epoch: {best_epoch}\n"
+                            f"Val IoU: {report_iou:.4f}\n"
+                            f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
+                            f"预计结束时间: {eta_time.strftime('%Y-%m-%d %H:%M')}"
+                        ),
+                    )
                 best_iou = val_result["iou"]
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                print(
-                    f"New best model saved at epoch {epoch+1} with IoU: {best_iou:.4f}"
+                logging.info(
+                    f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}"
                 )
 
-            # 定期保存检查点
-            if (epoch + 1) % 10 == 0:
-                checkpoint_path = os.path.join(
-                    checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth"
-                )
-                save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
+        wandb.summary["best_iou"] = best_iou
+        wandb.summary["best_epoch"] = best_epoch
 
-        # 记录最佳指标到SwanLab
-        swanlab.log(
-            {
-                "best/iou": swanlab.Text(str(best_iou)),
-                "best/epoch": swanlab.Text(str(best_epoch)),
-            }
-        )
-
-        print(f"Training completed. Best IoU: {best_iou:.4f} at epoch {best_epoch}")
-
-        # 测试
+        # --- 测试阶段 ---
+        logging.info("开始测试最佳模型...")
         if os.path.exists(best_model_path):
-            checkpoint = torch.load(best_model_path)
+            checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])
-            print("Best model loaded for testing")
 
-        test_result = test(model, test_loader, device, test_metrics)
+            # HDNet的test函数在trainer.py中没有区分，我们复用validate
+            _, test_result = validate(
+                model, test_loader, device, test_metrics, best_epoch
+            )
 
-        # 记录测试结果到SwanLab
-        swanlab.log(
-            {
-                "test/iou": test_result["iou"],
-                "test/precision": test_result["precision"],
-                "test/recall": test_result["recall"],
-                "test/f1": test_result["f1"],
-            }
-        )
+            wandb.log(
+                {
+                    "Result Board/IoU": test_result["iou"],
+                    "Result Board/F1": test_result["f1"],
+                    "Result Board/Precision": test_result["precision"],
+                    "Result Board/Recall": test_result["recall"],
+                }
+            )
+            logging.info(
+                f"测试结果 - IoU: {test_result['iou']:.4f}, F1: {test_result['f1']:.4f}"
+            )
 
-        print("Test Results:")
-        print(f"IoU: {test_result['iou']:.4f}")
-        print(f"Precision: {test_result['precision']:.4f}")
-        print(f"Recall: {test_result['recall']:.4f}")
-        print(f"F1: {test_result['f1']:.4f}")
+            end_message = (
+                f"训练完成!\n"
+                f"最佳 Val IoU: {best_iou:.4f} (at epoch {best_epoch})\n"
+                f"测试集 IoU: {test_result['iou']:.4f}"
+            )
+        else:
+            logging.warning("未找到最佳模型文件，跳过测试。")
+            end_message = f"训练完成! 最佳 Val IoU: {best_iou:.4f} (at epoch {best_epoch}). 未找到模型文件进行测试。"
+
+        send_message(title=f"实验结束: {experiment_name}", content=end_message)
 
     except Exception as e:
-        # 记录错误到SwanLab
-        try:
-            swanlab.log({"error": str(e)})
-        except:
-            pass
-        print(f"Error occurred: {e}")
+        logging.error(f"实验发生错误: {e}", exc_info=True)
+        send_message(title=f"实验失败: {experiment_name}", content=f"错误信息: \n{e}")
         raise
 
     finally:
-        swanlab.finish()
+        wandb.finish()
 
 
 if __name__ == "__main__":
