@@ -1,6 +1,6 @@
 config = {
     'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
-    'batch_size': 12,
+    'batch_size': 6,
     'num_workers': 4,
 
     'image_size': 512,
@@ -12,8 +12,8 @@ config = {
     'attn_drop_rate': 0.1,
     'drop_path_rate': 0.15,
 
-    'num_epochs': 400,
-    'mild_aug_epoch': 320,
+    'num_epochs': 500,
+    'mild_aug_epoch': 400,
     'learning_rate': 5e-4,
     'weight_decay': 1e-3,
     'save_dir': './runs',
