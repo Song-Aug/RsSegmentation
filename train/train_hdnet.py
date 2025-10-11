@@ -296,7 +296,7 @@ def main():
         # --- 测试阶段 ---
         logging.info("开始测试最佳模型...")
         if os.path.exists(best_model_path):
-            checkpoint = torch.load(best_model_path, map_location=device)
+            checkpoint = torch.load(best_model_path, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint["model_state_dict"])
 
             # HDNet的test函数在trainer.py中没有区分，我们复用validate
