@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
@@ -24,8 +24,6 @@ from utils4train.data_process import (
     BuildingSegmentationDataset,
     create_dataloaders,
     create_vis_dataloader,
-    get_mild_augmentations,
-    get_train_augmentations,
 )
 from utils4train.losses import stdsnet_loss
 from utils4train.metrics import SegmentationMetrics
@@ -58,7 +56,7 @@ def train_one_epoch(
         labels = batch["label"].to(device)
 
         optimizer.zero_grad()
-        with autocast():
+        with autocast(device_type=device.type, enabled=(device.type == "cuda")):
             outputs = model(images)
             loss, global_loss, shape_loss = stdsnet_loss(
                 outputs,
@@ -111,7 +109,7 @@ def validate(model, val_loader, device, metrics, epoch, loss_params):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            with autocast():
+            with autocast(device_type=device.type, enabled=(device.type == "cuda")):
                 outputs = model(images)
                 loss, global_loss, shape_loss = stdsnet_loss(
                     outputs,
@@ -223,7 +221,7 @@ def main():
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[config["warmup_epochs"]],
         )
-        scaler = GradScaler()
+        scaler = GradScaler(device_type="cuda", enabled=(device.type == "cuda"))
 
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
