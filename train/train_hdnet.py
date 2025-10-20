@@ -221,7 +221,7 @@ def main():
         )
 
         # --- 训练循环 ---
-        best_iou = 0.0
+        best_iou, report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
         start_time = datetime.now()

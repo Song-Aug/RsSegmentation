@@ -16,10 +16,10 @@ config = {
     "batch_size": 6,
     "num_workers": 4,
     "num_epochs": 300,
-    "seed": 3047,
+    "seed": 42,
     
     # --- Optimizer & Scheduler Params (Upgraded) ---
-    "learning_rate": 1e-3,
+    "learning_rate": 5e-4,
     "weight_decay": 1e-4,
     "warmup_epochs": 1,
     "min_lr": 1e-6,
