@@ -283,36 +283,3 @@ class STDSNet(nn.Module):
         )
 
         return global_pred, shape_pred
-
-
-if __name__ == "__main__":
-    # 1. 定义模型参数
-    num_classes = 2  # 例如：背景 + 建筑物
-    input_size = 512  # 输入图像尺寸
-
-    # 2. 实例化模型
-    # pretrained=False 避免在测试时下载权重
-    model = STDSNet(num_classes=num_classes, image_size=input_size, pretrained=False)
-    model.eval()  # 设置为评估模式
-
-    # 3. 创建一个伪输入张量 (dummy input)
-    # 形状: (batch_size, channels, height, width)
-    batch_size = 2
-    input_channels = 3
-    dummy_input = torch.randn(batch_size, input_channels, input_size, input_size)
-
-    print(f"模型: STDSNet")
-    print(f"输入张量形状: {dummy_input.shape}")
-
-    # 4. 执行前向传播
-    with torch.no_grad():  # 在评估时不需要计算梯度
-        global_pred, shape_pred = model(dummy_input)
-
-    # 5. 打印输出形状
-    print(f"全局流输出形状: {global_pred.shape}")
-    print(f"形状流输出形状: {shape_pred.shape}")
-
-    # 验证输出尺寸是否与输入匹配
-    assert global_pred.shape == (batch_size, num_classes, input_size, input_size)
-    assert shape_pred.shape == (batch_size, num_classes, input_size, input_size)
-    print("\n前向传播成功，输出尺寸正确！")

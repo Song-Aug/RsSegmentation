@@ -5,7 +5,7 @@ config = {
     "image_size": 512,
     "input_channels": 3,
     "use_nir": False,
-    "encoder_pretrained": False,
+    "encoder_pretrained": True,
     "shape_loss_weight": 0.4,
     "dice_ratio": 0.5,
     "num_epochs": 400,
