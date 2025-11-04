@@ -19,7 +19,7 @@ import wandb
 from configs.transcc_v2_config import config
 from utils4train.data_process import *
 from utils4train.metrics import SegmentationMetrics
-from models.TransCCV2 import create_transcc_v2
+from models.TransCCV3 import create_transcc_v3
 from utils4train.checkpoint import save_checkpoint
 from utils4train.losses import transcc_v2_loss
 from utils4train.trainer import test
@@ -141,8 +141,8 @@ def main():
         project="Building-Segmentation-3Bands",
         name=experiment_name,
         config=config,
-        notes="TransCCV2建筑物分割实验",
-        tags=["TransCCV2", "building-segmentation", "RGB", "KernelSize5"],
+        notes="TransCCV3建筑物分割实验",
+        tags=["TransCCV3"],
     )
 
     try:
@@ -183,13 +183,14 @@ def main():
             vis_loader = val_loader
 
         # 模型初始化
-        model = create_transcc_v2(
+        model = create_transcc_v3(
             {
                 "img_size": config["image_size"],
                 "patch_size": 16,
                 "in_chans": config["input_channels"],
                 "num_classes": config["num_classes"],
                 "depth": 9,
+                "hdnet_base_channel": 48
             }
         )
         model = model.to(device)
@@ -348,12 +349,6 @@ def main():
                 best_epoch = epoch + 1
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
                 logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
-
-            if (epoch + 1) % 10 == 0 and epoch > 100:
-                checkpoint_path = os.path.join(
-                    checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth"
-                )
-                save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
 
         wandb.summary["best_iou"] = best_iou
         wandb.summary["best_epoch"] = best_epoch

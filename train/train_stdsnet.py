@@ -1,6 +1,5 @@
 import os
 import sys
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta
@@ -11,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
@@ -42,8 +40,8 @@ def set_seed(seed: int) -> None:
 
 
 def train_one_epoch(
-    model, train_loader, optimizer, device, metrics, epoch, scaler, loss_params
-):
+    model, train_loader, optimizer, device, metrics, epoch, loss_params
+): # 移除了 scaler 参数
     model.train()
     total_loss = 0.0
     global_loss_total = 0.0
@@ -56,19 +54,18 @@ def train_one_epoch(
         labels = batch["label"].to(device)
 
         optimizer.zero_grad()
-        with autocast(device_type=device.type, enabled=(device.type == "cuda")):
-            outputs = model(images)
-            loss, global_loss, shape_loss = stdsnet_loss(
-                outputs,
-                labels,
-                seg_weight=1.0,
-                shape_weight=loss_params["shape_loss_weight"],
-                dice_ratio=loss_params["dice_ratio"],
-            )
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        outputs = model(images)
+        loss, global_loss, shape_loss = stdsnet_loss(
+            outputs,
+            labels,
+            seg_weight=1.0,
+            shape_weight=loss_params["shape_loss_weight"],
+            dice_ratio=loss_params["dice_ratio"],
+        )
+
+        loss.backward()
+        optimizer.step()
 
         total_loss += loss.item()
         global_loss_total += global_loss.item()
@@ -109,15 +106,15 @@ def validate(model, val_loader, device, metrics, epoch, loss_params):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            with autocast(device_type=device.type, enabled=(device.type == "cuda")):
-                outputs = model(images)
-                loss, global_loss, shape_loss = stdsnet_loss(
-                    outputs,
-                    labels,
-                    seg_weight=1.0,
-                    shape_weight=loss_params["shape_loss_weight"],
-                    dice_ratio=loss_params["dice_ratio"],
-                )
+            # 移除了 with autocast(...)
+            outputs = model(images)
+            loss, global_loss, shape_loss = stdsnet_loss(
+                outputs,
+                labels,
+                seg_weight=1.0,
+                shape_weight=loss_params["shape_loss_weight"],
+                dice_ratio=loss_params["dice_ratio"],
+            )
 
             total_loss += loss.item()
             global_loss_total += global_loss.item()
@@ -221,7 +218,7 @@ def main():
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[config["warmup_epochs"]],
         )
-        scaler = GradScaler(device_type="cuda", enabled=(device.type == "cuda"))
+        # 移除了 scaler = GradScaler(...)
 
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
@@ -269,7 +266,7 @@ def main():
                 device,
                 train_metrics,
                 epoch + 1,
-                scaler=scaler,
+                # 移除了 scaler=scaler
                 loss_params=loss_params,
             )
 
@@ -347,13 +344,6 @@ def main():
                 logging.info(
                     f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}"
                 )
-
-            if (epoch + 1) % 10 == 0 and epoch > 100:
-                checkpoint_path = os.path.join(
-                    checkpoint_dir,
-                    f"checkpoint_epoch_{epoch+1}.pth",
-                )
-                save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
 
         wandb.summary["best_iou"] = best_iou
         wandb.summary["best_epoch"] = best_epoch
