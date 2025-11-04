@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
@@ -51,7 +51,7 @@ def train_one_epoch(model, train_loader, optimizer, device, metrics, epoch, scal
         labels = batch["label"].to(device)
 
         optimizer.zero_grad()
-        with autocast():
+        with autocast(device_type='cuda', dtype=torch.float16):
             outputs = model(images)
             loss, seg_loss, boundary_loss = transcc_v2_loss(
                 outputs, labels, seg_weight=1.0, boundary_weight=1.3, aux_weight=0.4
@@ -100,7 +100,7 @@ def validate(model, val_loader, device, metrics, epoch):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            with autocast():
+            with autocast(device_type='cuda', dtype=torch.float16):
                 outputs = model(images)
                 loss, seg_loss, boundary_loss = transcc_v2_loss(outputs, labels)
 
@@ -237,7 +237,7 @@ def main():
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[config["warmup_epochs"]],
         )
-        scaler = GradScaler()
+        scaler = GradScaler(init_scale=2.**16, enabled=(device.type == 'cuda'))
 
         # 初始化评价指标
         train_metrics = SegmentationMetrics(config["num_classes"])

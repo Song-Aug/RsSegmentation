@@ -228,7 +228,7 @@ class FeatureAggregator(nn.Module):
         x = self.conv3x3(x)
         x = self.attention(x)
         return x
-        
+
 class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels, rates=[3, 6, 12, 18]):
         super(ASPP, self).__init__()
@@ -283,13 +283,10 @@ class Bottleneck(nn.Module):
         out += residual; out = self.relu(out)
         return out
 
-# 注意：HDNet的Stagetwo_decouple和Stagethree_decouple是 *解码器* 的一部分，
-# 我们这里只复用它的 *编码器* 结构 (Stem, Layer1, Transition, Stage2, Transition2)
-# 我们将HDNet的Stage2和Stage3的 *分支模块* (BasicBlock堆叠) 作为CNN流
 class HDNetStage(nn.Module):
     """
     简化的HDNet Stage，用于多尺度特征提取
-    (移除了Stagetwo_decouple中的 flow_field 和 Fusion)
+    (修正了 fuse_layers 的下采样逻辑)
     """
     def __init__(self, input_branches, output_branches, c):
         super(HDNetStage, self).__init__()
@@ -302,6 +299,7 @@ class HDNetStage(nn.Module):
             branch = nn.Sequential(BasicBlock(w, w), BasicBlock(w, w), BasicBlock(w, w), BasicBlock(w, w))
             self.branches.append(branch)
         
+        # --- 修正点在这里 ---
         self.fuse_layers = nn.ModuleList()
         for i in range(self.output_branches):
             self.fuse_layers.append(nn.ModuleList())
@@ -309,6 +307,7 @@ class HDNetStage(nn.Module):
                 if i == j:
                     self.fuse_layers[-1].append(nn.Identity())
                 elif i < j:
+                    # 上采样 (j > i)
                     self.fuse_layers[-1].append(
                         nn.Sequential(
                             nn.Conv2d(c * (2 ** j), c * (2 ** i), kernel_size=1, stride=1, bias=False),
@@ -316,9 +315,11 @@ class HDNetStage(nn.Module):
                             nn.Upsample(scale_factor=2.0 ** (j - i), mode='bilinear', align_corners=ALIGN_CORNERS)
                         )
                     )
-                else:
+                else: 
+                    # 下采样 (i > j) - 复制 HDNet 的原始逻辑
                     ops = []
-                    for k in range(i - j):
+                    # 逐步下采样，保持通道数
+                    for k in range(i - j - 1):
                         ops.append(
                             nn.Sequential(
                                 nn.Conv2d(c * (2 ** j), c * (2 ** j), kernel_size=3, stride=2, padding=1, bias=False),
@@ -326,17 +327,32 @@ class HDNetStage(nn.Module):
                                 nn.ReLU(inplace=True)
                             )
                         )
+                    # 最后一次下采样，并调整通道数
+                    ops.append(
+                        nn.Sequential(
+                            nn.Conv2d(c * (2 ** j), c * (2 ** i), kernel_size=3, stride=2, padding=1, bias=False),
+                            nn.BatchNorm2d(c * (2 ** i), momentum=BN_MOMENTUM)
+                        )
+                    )
                     self.fuse_layers[-1].append(nn.Sequential(*ops))
+        # --- 修正结束 ---
+        
         self.relu = nn.ReLU(inplace=False)
 
     def forward(self, x):
-        x = [branch(xi) for branch, xi in zip(self.branches, x)]
+        # 1. 通过各自的分支
+        x_branched = [branch(xi) for branch, xi in zip(self.branches, x)]
+        
+        # 2. 融合特征
         x_fused = []
         for i in range(len(self.fuse_layers)):
-            y = x[0] if i == 0 else self.fuse_layers[i][0](x[0])
+            # y 初始化
+            y = self.fuse_layers[i][0](x_branched[0])
+            # 累加其他分支
             for j in range(1, self.input_branches):
-                y = y + self.fuse_layers[i][j](x[j])
+                y = y + self.fuse_layers[i][j](x_branched[j])
             x_fused.append(self.relu(y))
+            
         return x_fused
 
 class CNNEncoder(nn.Module):

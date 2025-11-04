@@ -1,6 +1,6 @@
 config = {
     'data_root': '/mnt/data1/rove/asset/GF7_Building/3Bands',
-    'batch_size': 1,
+    'batch_size': 2,
     'num_workers': 4,
 
     'image_size': 512,
