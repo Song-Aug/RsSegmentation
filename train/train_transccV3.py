@@ -16,7 +16,8 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
-from configs.transcc_v2_config import config
+
+from configs.transcc_v3_config import config
 from utils4train.data_process import *
 from utils4train.metrics import SegmentationMetrics
 from models.TransCCV3 import create_transcc_v3

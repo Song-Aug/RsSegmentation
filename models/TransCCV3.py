@@ -214,6 +214,21 @@ class CBAMResidualBlock(nn.Module):
         out = self.cbam(out); out += residual; out = self.relu(out)
         return out
 
+
+class FeatureAggregator(nn.Module):
+    """多尺度特征聚合模块"""
+    def __init__(self, in_channels, out_channels):
+        super(FeatureAggregator, self).__init__()
+        self.conv1x1 = ConvBlock(in_channels, out_channels, kernel_size=1, padding=0)
+        self.conv3x3 = ConvBlock(out_channels, out_channels, kernel_size=3, padding=1)
+        self.attention = CBAM(out_channels)
+    
+    def forward(self, x):
+        x = self.conv1x1(x)
+        x = self.conv3x3(x)
+        x = self.attention(x)
+        return x
+        
 class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels, rates=[3, 6, 12, 18]):
         super(ASPP, self).__init__()
@@ -578,8 +593,7 @@ class TransCCV3(nn.Module):
         return self.decoder(transformer_features, cnn_skip_features)
 
 
-def create_transcc_v3(config: Optional[dict] = None) -> HybridFormer:
-    """创建 HybridFormer 模型的工厂函数"""
+def create_transcc_v3(config: Optional[dict] = None) -> TransCCV3:
     if config is None:
         config = {
             'img_size': 512, 'patch_size': 16, 'in_chans': 3, 'num_classes': 2, 'embed_dim': 768,
@@ -587,4 +601,4 @@ def create_transcc_v3(config: Optional[dict] = None) -> HybridFormer:
             'attn_drop_rate': 0.0, 'drop_path_rate': 0.1, 'decoder_channels': [512, 256, 128, 64],
             'use_fourier_pos': True, 'hdnet_base_channel': 48,
         }
-    return HybridFormer(**config)
+    return TransCCV3(**config)
