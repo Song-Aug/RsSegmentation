@@ -1,6 +1,5 @@
 import os
 import sys
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
@@ -23,7 +22,6 @@ from utils4train.metrics import SegmentationMetrics
 from models.TransCCV3 import create_transcc_v3
 from utils4train.checkpoint import save_checkpoint
 from utils4train.losses import transcc_v2_loss
-from utils4train.trainer import test
 from utils4train.visualization import create_sample_images
 from utils4train.alerts_by_lark import send_message
 
@@ -130,6 +128,25 @@ def validate(model, val_loader, device, metrics, epoch):
     return avg_total, avg_seg, avg_bd, metric_values
 
 
+def test(model, test_loader, device):
+    model.eval()
+    
+    with torch.no_grad():
+        pbar = tqdm(test_loader, desc='Testing')
+        for batch in pbar:
+            images = batch['image'].to(device)
+            labels = batch['label'].to(device)
+            
+            # 前向传播
+            output = model(images)
+            main_output = output[0] if isinstance(output, tuple) else output
+
+            pred = torch.argmax(main_output, dim=1).cpu().numpy()
+            target = labels.cpu().numpy()
+            metrics.update(pred, target)
+    
+    test_metrics = metrics.get_metrics()
+    return test_metrics
 def main():
     # 设置随机种子
     set_seed(config["seed"])
