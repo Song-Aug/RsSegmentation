@@ -219,7 +219,12 @@ def main():
         pretrained_path = config.get("pretrained_weights", None)
         fusion_strategy = config.get("fusion_strategy", "interpolate")
         if pretrained_path:
-            model = load_pretrained_weights(model, pretrained_path, fusion_strategy)
+            model = load_pretrained_weights(
+                model, 
+                pretrained_path, 
+                fusion_strategy, 
+                encoder_name='transformer_encoder'
+            )
 
         # 计算并记录模型参数量
         total_params = sum(p.numel() for p in model.parameters())
