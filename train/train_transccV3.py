@@ -128,25 +128,27 @@ def validate(model, val_loader, device, metrics, epoch):
     return avg_total, avg_seg, avg_bd, metric_values
 
 
-def test(model, test_loader, device):
+def test(model, test_loader, device, metrics):
     model.eval()
-    
-    with torch.no_grad():
-        pbar = tqdm(test_loader, desc='Testing')
-        for batch in pbar:
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
-            
-            # 前向传播
-            output = model(images)
-            main_output = output[0] if isinstance(output, tuple) else output
+    metrics.reset()
 
-            pred = torch.argmax(main_output, dim=1).cpu().numpy()
-            target = labels.cpu().numpy()
-            metrics.update(pred, target)
-    
-    test_metrics = metrics.get_metrics()
-    return test_metrics
+    with torch.no_grad():
+        pbar = tqdm(test_loader, desc="Testing")
+        for batch_idx, batch in enumerate(pbar):
+            images = batch["image"].to(device)
+            labels = batch["label"].to(device)
+
+            with autocast(device_type='cuda', dtype=torch.float16):
+                outputs = model(images)
+
+            main_output = outputs[0]
+            preds = torch.argmax(main_output, dim=1).cpu().numpy()
+            targets = labels.cpu().numpy()
+            metrics.update(preds, targets)
+
+    metric_values = metrics.get_metrics()
+
+    return metric_values
 def main():
     # 设置随机种子
     set_seed(config["seed"])
@@ -154,7 +156,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # W&B实验看板初始化
-    experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
+    # experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
+    experiment_name = "TransCC_V3_1109"
     wandb.init(
         project="Building-Segmentation-3Bands",
         name=experiment_name,
@@ -303,82 +306,83 @@ def main():
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
 
-        for epoch in range(config["num_epochs"]):
-            train_loader = train_loader_mild if epoch + 1 > config['mild_aug_epoch'] else train_loader_strong
-            train_total, train_seg, train_bd, train_result = train_one_epoch(
-                model, train_loader, optimizer, device, train_metrics, epoch + 1, scaler=scaler
-            )
+        # for epoch in range(config["num_epochs"]):
+        #     train_loader = train_loader_mild if epoch + 1 > config['mild_aug_epoch'] else train_loader_strong
+        #     train_total, train_seg, train_bd, train_result = train_one_epoch(
+        #         model, train_loader, optimizer, device, train_metrics, epoch + 1, scaler=scaler
+        #     )
 
-            val_total, val_seg, val_bd, val_result = validate(
-                model, val_loader, device, val_metrics, epoch + 1
-            )
+        #     val_total, val_seg, val_bd, val_result = validate(
+        #         model, val_loader, device, val_metrics, epoch + 1
+        #     )
 
-            scheduler.step()
+        #     scheduler.step()
 
-            # 使用 wandb.log 记录训练和验证指标
-            wandb.log(
-                {   
-                    "Comparison Board/IoU": val_result["iou"],
-                    "Comparison Board/F1": val_result["f1"],
-                    "Comparison Board/Precision": val_result["precision"],
-                    "Comparison Board/Recall": val_result["recall"],
+        #     # 使用 wandb.log 记录训练和验证指标
+        #     wandb.log(
+        #         {   
+        #             "Comparison Board/IoU": val_result["iou"],
+        #             "Comparison Board/F1": val_result["f1"],
+        #             "Comparison Board/Precision": val_result["precision"],
+        #             "Comparison Board/Recall": val_result["recall"],
 
-                    "Train_info/Loss/Train": train_total,
-                    "Train_info/Loss/Val": val_total,
-                    "Train_info/Seg_Loss/Train": train_seg,
-                    "Train_info/Seg_Loss/Val": val_seg,
-                    "Train_info/Boundary_Loss/Train": train_bd,
-                    "Train_info/Boundary_Loss/Val": val_bd,
-                    "Train_info/IoU/Train": train_result["iou"],
-                    "Train_info/IoU/Val": val_result["iou"],
-                    "Train_info/F1/Train": train_result["f1"],
-                    "Train_info/F1/Val": val_result["f1"],
+        #             "Train_info/Loss/Train": train_total,
+        #             "Train_info/Loss/Val": val_total,
+        #             "Train_info/Seg_Loss/Train": train_seg,
+        #             "Train_info/Seg_Loss/Val": val_seg,
+        #             "Train_info/Boundary_Loss/Train": train_bd,
+        #             "Train_info/Boundary_Loss/Val": val_bd,
+        #             "Train_info/IoU/Train": train_result["iou"],
+        #             "Train_info/IoU/Val": val_result["iou"],
+        #             "Train_info/F1/Train": train_result["f1"],
+        #             "Train_info/F1/Val": val_result["f1"],
 
-                    "Train_info/Learning_Rate": optimizer.param_groups[0]["lr"]
-                }
-            )
+        #             "Train_info/Learning_Rate": optimizer.param_groups[0]["lr"]
+        #         }
+        #     )
 
-            logging.info(
-                f"epoch: {epoch+1}, "
-                f"train_iou: {train_result['iou']:.4f}, val_iou: {val_result['iou']:.4f}, "
-                f"train_loss: {train_total:.4f}, val_loss: {val_total:.4f}, "
-                f"lr: {optimizer.param_groups[0]['lr']:.6g}"
-            )
+        #     logging.info(
+        #         f"epoch: {epoch+1}, "
+        #         f"train_iou: {train_result['iou']:.4f}, val_iou: {val_result['iou']:.4f}, "
+        #         f"train_loss: {train_total:.4f}, val_loss: {val_total:.4f}, "
+        #         f"lr: {optimizer.param_groups[0]['lr']:.6g}"
+        #     )
 
-            # 每10个epoch保存一次可视化结果
-            if (epoch + 1) % 10 == 0:
-                figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
-                if figure:
-                    wandb.log({"Prediction_Summary": wandb.Image(figure)})
-                    plt.close(figure)
+        #     # 每10个epoch保存一次可视化结果
+        #     if (epoch + 1) % 10 == 0:
+        #         figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
+        #         if figure:
+        #             wandb.log({"Prediction_Summary": wandb.Image(figure)})
+        #             plt.close(figure)
 
-            if val_result["iou"] > best_iou:
-                if val_result["iou"] > 0.73 and val_result["iou"] - report_iou > 0.01:
-                    report_iou = val_result["iou"]
-                    elapsed = (datetime.now() - start_time).total_seconds()
-                    eta_seconds = (elapsed / (epoch + 1)) * (config["num_epochs"] - (epoch + 1))
-                    eta_time = datetime.now() + timedelta(seconds=eta_seconds)
-                    send_message(
-                        title=f"{experiment_name}：模型最佳指标更新",
-                        content=(
-                            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-                            f"Epoch: {best_epoch}\n"
-                            f"Val IoU: {report_iou:.4f}\n"
-                            f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
-                            f"预计结束时间: {eta_time.strftime('%Y-%m-%d %H:%M')}"
-                        ),
-                    )
-                best_iou = val_result["iou"]
-                best_epoch = epoch + 1
-                save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
-                logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
+        #     if val_result["iou"] > best_iou:
+        #         if val_result["iou"] > 0.73 and val_result["iou"] - report_iou > 0.01:
+        #             report_iou = val_result["iou"]
+        #             elapsed = (datetime.now() - start_time).total_seconds()
+        #             eta_seconds = (elapsed / (epoch + 1)) * (config["num_epochs"] - (epoch + 1))
+        #             eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+        #             send_message(
+        #                 title=f"{experiment_name}：模型最佳指标更新",
+        #                 content=(
+        #                     f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        #                     f"Epoch: {best_epoch}\n"
+        #                     f"Val IoU: {report_iou:.4f}\n"
+        #                     f"Cur lr: {optimizer.param_groups[0]['lr']:.6g}\n"
+        #                     f"预计结束时间: {eta_time.strftime('%Y-%m-%d %H:%M')}"
+        #                 ),
+        #             )
+        #         best_iou = val_result["iou"]
+        #         best_epoch = epoch + 1
+        #         save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
+        #         logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
 
-        wandb.summary["best_iou"] = best_iou
-        wandb.summary["best_epoch"] = best_epoch
+        # wandb.summary["best_iou"] = best_iou
+        # wandb.summary["best_epoch"] = best_epoch
 
         if os.path.exists(best_model_path):
-            checkpoint = torch.load(best_model_path, map_location=device)
+            checkpoint = torch.load(best_model_path, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint["model_state_dict"])
+            logging.info(f"Loaded best model from epoch {checkpoint['epoch']} with IoU: {checkpoint['best_iou']:.4f}")
 
         test_result = test(model, test_loader, device, test_metrics)
         wandb.log(
