@@ -17,7 +17,7 @@ config = {
     'learning_rate': 5e-4,
     'weight_decay': 1e-3,
     'save_dir': './runs',
-    'model_name': 'TransCC_V3',
+    'model_name': 'TransCC_V3_noBdloss',
     'num_classes': 2,
     'seed': 3047,
     'warmup_epochs': 10,
