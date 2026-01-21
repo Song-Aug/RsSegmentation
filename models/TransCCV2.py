@@ -267,7 +267,7 @@ class Encoder(nn.Module):
         layer_features = []
         for i, block in enumerate(self.blocks):
             x = block(x)
-            if i in [1, 3, 5]:  # Collect features from specific layers
+            if i in [1, 3, 5]:  
                 layer_features.append(x[:, 1:, :])
         
         return self.norm(x), layer_features
@@ -394,7 +394,7 @@ class DecoderV2(nn.Module):
         self.seg_head_main = nn.Conv2d(decoder_channels[3] // 2, num_classes, 1)
         self.boundary_head_aux = nn.Sequential(ConvBlock(decoder_channels[2], decoder_channels[2] // 2), nn.Conv2d(decoder_channels[2] // 2, 1, 1))
         
-        # --- 强化的边界预测头 ---
+        
         self.boundary_head_main = nn.Sequential(
             ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4, kernel_size=3),
             CBAM(decoder_channels[3] // 4),
@@ -423,7 +423,7 @@ class DecoderV2(nn.Module):
         x = features.transpose(1, 2).reshape(B, self.decoder_channels[0], H, W)
         x = self.initial_conv(x)
         
-        # Stage 1
+        
         x = self.cbam_blocks[0](x)
         x = self.upsample_layers[0](x)
         if len(layer_features) >= 1:
@@ -431,7 +431,7 @@ class DecoderV2(nn.Module):
         x = self.feature_aggregators[0](x)
         seg_aux1 = self.seg_head_stage1(x)
 
-        # Stage 2
+        
         x = self.cbam_blocks[1](x)
         x = self.upsample_layers[1](x)
         if len(layer_features) >= 2:
@@ -439,7 +439,7 @@ class DecoderV2(nn.Module):
         x = self.feature_aggregators[1](x)
         seg_aux2 = self.seg_head_stage2(x)
 
-        # Stage 3
+        
         x = self.cbam_blocks[2](x)
         boundary_aux = self.boundary_head_aux(x)
         x = self.upsample_layers[2](x)
@@ -447,14 +447,14 @@ class DecoderV2(nn.Module):
             x = self.skip_connections[2](layer_features[2], x)
         x = self.feature_aggregators[2](x)
 
-        # Final stage
+        
         x = self.upsample_layers[3](x)
         x = self.dropout(x)
         x = self.final_proj(x)
         seg_main = self.seg_head_main(x)
         boundary_main = self.boundary_head_main(x)
 
-        # Upsample all outputs to original image size for loss calculation
+        
         seg_main_out = F.interpolate(seg_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
         seg_aux1_out = F.interpolate(seg_aux1, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
         seg_aux2_out = F.interpolate(seg_aux2, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)

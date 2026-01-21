@@ -41,7 +41,7 @@ def set_seed(seed: int) -> None:
 
 def train_one_epoch(
     model, train_loader, optimizer, device, metrics, epoch, loss_params
-): # 移除了 scaler 参数
+): 
     model.train()
     total_loss = 0.0
     global_loss_total = 0.0
@@ -106,7 +106,7 @@ def validate(model, val_loader, device, metrics, epoch, loss_params):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            # 移除了 with autocast(...)
+            
             outputs = model(images)
             loss, global_loss, shape_loss = stdsnet_loss(
                 outputs,
@@ -161,7 +161,7 @@ def main():
     }
 
     try:
-        # 数据加载
+        
         train_loader, val_loader, test_loader = create_dataloaders(
             root_dir=config["data_root"],
             batch_size=config["batch_size"],
@@ -218,7 +218,7 @@ def main():
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[config["warmup_epochs"]],
         )
-        # 移除了 scaler = GradScaler(...)
+        
 
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
@@ -266,7 +266,7 @@ def main():
                 device,
                 train_metrics,
                 epoch + 1,
-                # 移除了 scaler=scaler
+                
                 loss_params=loss_params,
             )
 

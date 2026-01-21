@@ -6,13 +6,13 @@ from typing import List, Optional, Tuple
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import collections
 
-# --- 全局常量 (来自 HDNet) ---
+
 BN_MOMENTUM = 0.1
 ALIGN_CORNERS = True
 
-# --------------------------------------------------------------------------
-# 1. 来自 TransCCV2 的模块 (Transformer + 基础卷积块)
-# --------------------------------------------------------------------------
+
+
+
 
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
@@ -158,12 +158,12 @@ class TransformerEncoder(nn.Module):
             x += self.pos_embed
         
         x = self.pos_drop(x)
-        # --- 修改点 ---
-        # 只运行所有块，不再收集
+        
+        
         for block in self.blocks:
             x = block(x)
         
-        return self.norm(x) # 只返回最终的全局特征
+        return self.norm(x) 
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False):
@@ -243,9 +243,9 @@ class ASPP(nn.Module):
         features.append(pooled_features); x = torch.cat(features, dim=1)
         x = self.conv_out(x); return self.dropout(x)
 
-# --------------------------------------------------------------------------
-# 2. 来自 HDNet 的模块 (CNN骨干)
-# --------------------------------------------------------------------------
+
+
+
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -299,7 +299,7 @@ class HDNetStage(nn.Module):
             branch = nn.Sequential(BasicBlock(w, w), BasicBlock(w, w), BasicBlock(w, w), BasicBlock(w, w))
             self.branches.append(branch)
         
-        # --- 修正点在这里 ---
+        
         self.fuse_layers = nn.ModuleList()
         for i in range(self.output_branches):
             self.fuse_layers.append(nn.ModuleList())
@@ -307,7 +307,7 @@ class HDNetStage(nn.Module):
                 if i == j:
                     self.fuse_layers[-1].append(nn.Identity())
                 elif i < j:
-                    # 上采样 (j > i)
+                    
                     self.fuse_layers[-1].append(
                         nn.Sequential(
                             nn.Conv2d(c * (2 ** j), c * (2 ** i), kernel_size=1, stride=1, bias=False),
@@ -316,9 +316,9 @@ class HDNetStage(nn.Module):
                         )
                     )
                 else: 
-                    # 下采样 (i > j) - 复制 HDNet 的原始逻辑
+                    
                     ops = []
-                    # 逐步下采样，保持通道数
+                    
                     for k in range(i - j - 1):
                         ops.append(
                             nn.Sequential(
@@ -327,7 +327,7 @@ class HDNetStage(nn.Module):
                                 nn.ReLU(inplace=True)
                             )
                         )
-                    # 最后一次下采样，并调整通道数
+                    
                     ops.append(
                         nn.Sequential(
                             nn.Conv2d(c * (2 ** j), c * (2 ** i), kernel_size=3, stride=2, padding=1, bias=False),
@@ -335,20 +335,20 @@ class HDNetStage(nn.Module):
                         )
                     )
                     self.fuse_layers[-1].append(nn.Sequential(*ops))
-        # --- 修正结束 ---
+        
         
         self.relu = nn.ReLU(inplace=False)
 
     def forward(self, x):
-        # 1. 通过各自的分支
+        
         x_branched = [branch(xi) for branch, xi in zip(self.branches, x)]
         
-        # 2. 融合特征
+        
         x_fused = []
         for i in range(len(self.fuse_layers)):
-            # y 初始化
+            
             y = self.fuse_layers[i][0](x_branched[0])
-            # 累加其他分支
+            
             for j in range(1, self.input_branches):
                 y = y + self.fuse_layers[i][j](x_branched[j])
             x_fused.append(self.relu(y))
@@ -375,7 +375,7 @@ class CNNEncoder(nn.Module):
             nn.Sequential(nn.Sequential(nn.Conv2d(256, base_channel * 2, kernel_size=3, stride=2, padding=1, bias=False), nn.BatchNorm2d(base_channel * 2, momentum=BN_MOMENTUM), nn.ReLU(inplace=True)))
         ])
         
-        # 我们用简化的HDNetStage替换原来的decouple stage
+        
         self.stage2 = HDNetStage(input_branches=2, output_branches=2, c=base_channel)
         
         self.transition2 = nn.ModuleList([
@@ -384,49 +384,49 @@ class CNNEncoder(nn.Module):
         ])
 
     def forward(self, x):
-        # Stem (512 -> 256)
+        
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
         x = self.relu(self.bn3(self.conv3(x)))
         
-        # Stage 1 (256)
+        
         x = self.layer1(x)
         
-        # Transition 1 (256 -> 256, 128)
+        
         x_list = [trans(x) for trans in self.transition1]
-        skip_256 = x_list[0] # (B, 48, 256, 256)
+        skip_256 = x_list[0] 
         
-        # Stage 2 (256, 128)
+        
         x_list = self.stage2(x_list)
-        skip_128 = x_list[1] # (B, 96, 128, 128)
+        skip_128 = x_list[1] 
         
-        # Transition 2 (256, 128 -> 256, 128, 64)
+        
         x_list_s3 = [self.transition2[i](x_list[i]) if i < 2 else self.transition2[i](x_list[-1]) for i in range(3)]
-        skip_64 = x_list_s3[2] # (B, 192, 64, 64)
+        skip_64 = x_list_s3[2] 
         
-        # 返回解码器所需的多尺度跳层特征
-        # [skip_64, skip_128, skip_256]
+        
+        
         return [skip_64, skip_128, skip_256]
 
 
-# --------------------------------------------------------------------------
-# 3. 混合解码器与新模型
-# --------------------------------------------------------------------------
+
+
+
 
 class CNNSkipConnection(nn.Module):
     """(新) 跳级连接模块，用于融合 CNN 局部特征和 Decoder 特征"""
     def __init__(self, cnn_channels, decoder_channels, out_channels):
         super(CNNSkipConnection, self).__init__()
-        # 1x1 卷积统一 CNN 特征通道
+        
         self.cnn_proj = ConvBlock(cnn_channels, out_channels, kernel_size=1, padding=0)
-        # 1x1 卷积统一 Decoder 特征通道
+        
         self.decoder_proj = ConvBlock(decoder_channels, out_channels, kernel_size=1, padding=0)
-        # 融合后的卷积
+        
         self.fusion_conv = ConvBlock(out_channels * 2, out_channels, kernel_size=3, padding=1)
         self.attention = CBAM(out_channels)
     
     def forward(self, cnn_feat, decoder_feat):
-        # 确保空间尺寸一致 (理论上CNN skip应该更大或相等，这里以上采样为准)
+        
         if cnn_feat.shape[2:] != decoder_feat.shape[2:]:
              cnn_feat = F.interpolate(cnn_feat, size=decoder_feat.shape[2:], mode='bilinear', align_corners=False)
 
@@ -445,51 +445,51 @@ class HybridDecoder(nn.Module):
     """
     def __init__(self, embed_dim: int = 768, img_size: int = 512, num_classes: int = 2, 
                  decoder_channels: List[int] = [512, 256, 128, 64],
-                 cnn_skip_channels: List[int] = [192, 96, 48]): # [c64, c128, c256]
+                 cnn_skip_channels: List[int] = [192, 96, 48]): 
         super().__init__()
         self.img_size = img_size
         self.decoder_channels = decoder_channels
         
-        # 1. Transformer 特征投影 (解码器起点)
+        
         self.feature_proj = nn.Sequential(
             nn.Linear(embed_dim, decoder_channels[0]),
             nn.LayerNorm(decoder_channels[0])
         )
         self.initial_conv = ConvBlock(decoder_channels[0], decoder_channels[0])
         
-        # 2. 上采样层 (与 TransCCV2 相同)
+        
         self.upsample_layers = nn.ModuleList([
-            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[0], decoder_channels[1])), # 32->64 (512->256)
-            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[1], decoder_channels[2])), # 64->128 (256->128)
-            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[2], decoder_channels[3])), # 128->256 (128->64)
-            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[3], decoder_channels[3]))  # 256->512 (64->64)
+            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[0], decoder_channels[1])), 
+            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[1], decoder_channels[2])), 
+            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[2], decoder_channels[3])), 
+            nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False), ConvBlock(decoder_channels[3], decoder_channels[3]))  
         ])
         
-        # 3. CBAM 块 (与 TransCCV2 相同)
+        
         self.cbam_blocks = nn.ModuleList([
             CBAMResidualBlock(decoder_channels[0], decoder_channels[0]),
             CBAMResidualBlock(decoder_channels[1], decoder_channels[1]),
             CBAMResidualBlock(decoder_channels[2], decoder_channels[2])
         ])
         
-        # 4. (修改点) 跳层连接，使用 CNNSkipConnection
+        
         self.skip_connections = nn.ModuleList([
-            # 融合 64x64 特征
-            CNNSkipConnection(cnn_skip_channels[0], decoder_channels[1], decoder_channels[1]), # (c_cnn=192, c_dec=256, out=256)
-            # 融合 128x128 特征
-            CNNSkipConnection(cnn_skip_channels[1], decoder_channels[2], decoder_channels[2]), # (c_cnn=96, c_dec=128, out=128)
-            # 融合 256x256 特征
-            CNNSkipConnection(cnn_skip_channels[2], decoder_channels[3], decoder_channels[3])  # (c_cnn=48, c_dec=64, out=64)
+            
+            CNNSkipConnection(cnn_skip_channels[0], decoder_channels[1], decoder_channels[1]), 
+            
+            CNNSkipConnection(cnn_skip_channels[1], decoder_channels[2], decoder_channels[2]), 
+            
+            CNNSkipConnection(cnn_skip_channels[2], decoder_channels[3], decoder_channels[3])  
         ])
         
-        # 5. 特征聚合器 (与 TransCCV2 相同)
+        
         self.feature_aggregators = nn.ModuleList([
             FeatureAggregator(decoder_channels[1], decoder_channels[1]),
             FeatureAggregator(decoder_channels[2], decoder_channels[2]),
             FeatureAggregator(decoder_channels[3], decoder_channels[3])
         ])
         
-        # 6. 输出头 (与 TransCCV2 相同)
+        
         self.seg_head_stage1 = nn.Sequential(ConvBlock(decoder_channels[1], decoder_channels[1] // 2), nn.Conv2d(decoder_channels[1] // 2, num_classes, 1))
         self.seg_head_stage2 = nn.Sequential(ConvBlock(decoder_channels[2], decoder_channels[2] // 2), nn.Conv2d(decoder_channels[2] // 2, num_classes, 1))
         self.final_proj = ASPP(decoder_channels[3], decoder_channels[3] // 2)
@@ -512,49 +512,49 @@ class HybridDecoder(nn.Module):
 
     def forward(self, transformer_features, cnn_skip_features):
         B, _, _ = transformer_features.shape
-        # (B, N+1, C) -> (B, N, C)
+        
         patch_features = transformer_features[:, 1:, :] 
         
-        # (B, N, C) -> (B, N, C_dec[0])
+        
         features = self.feature_proj(patch_features) 
-        H = W = int(features.shape[1] ** 0.5) # 32x32
+        H = W = int(features.shape[1] ** 0.5) 
         
-        # (B, N, C_dec[0]) -> (B, C_dec[0], H, W)
+        
         x = features.transpose(1, 2).reshape(B, self.decoder_channels[0], H, W)
-        x = self.initial_conv(x) # (B, 512, 32, 32)
+        x = self.initial_conv(x) 
         
-        # --- Stage 1 ---
+        
         x = self.cbam_blocks[0](x)
-        x = self.upsample_layers[0](x) # (B, 256, 64, 64)
-        # 融合 CNN skip[0] (64x64)
+        x = self.upsample_layers[0](x) 
+        
         x = self.skip_connections[0](cnn_skip_features[0], x) 
         x = self.feature_aggregators[0](x)
         seg_aux1 = self.seg_head_stage1(x)
 
-        # --- Stage 2 ---
+        
         x = self.cbam_blocks[1](x)
-        x = self.upsample_layers[1](x) # (B, 128, 128, 128)
-        # 融合 CNN skip[1] (128x128)
+        x = self.upsample_layers[1](x) 
+        
         x = self.skip_connections[1](cnn_skip_features[1], x)
         x = self.feature_aggregators[1](x)
         seg_aux2 = self.seg_head_stage2(x)
 
-        # --- Stage 3 ---
+        
         x = self.cbam_blocks[2](x)
         boundary_aux = self.boundary_head_aux(x)
-        x = self.upsample_layers[2](x) # (B, 64, 256, 256)
-        # 融合 CNN skip[2] (256x256)
+        x = self.upsample_layers[2](x) 
+        
         x = self.skip_connections[2](cnn_skip_features[2], x)
         x = self.feature_aggregators[2](x)
 
-        # --- Final stage ---
-        x = self.upsample_layers[3](x) # (B, 64, 512, 512)
+        
+        x = self.upsample_layers[3](x) 
         x = self.dropout(x)
         x = self.final_proj(x)
         seg_main = self.seg_head_main(x)
         boundary_main = self.boundary_head_main(x)
 
-        # 上采样所有输出到原始尺寸
+        
         seg_main_out = F.interpolate(seg_main, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
         seg_aux1_out = F.interpolate(seg_aux1, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
         seg_aux2_out = F.interpolate(seg_aux2, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
@@ -579,33 +579,33 @@ class TransCCV3(nn.Module):
                  hdnet_base_channel: int = 48):
         super().__init__()
         
-        # 1. 全局流: Transformer 编码器
+        
         self.transformer_encoder = TransformerEncoder(
             img_size, patch_size, in_chans, embed_dim, depth, num_heads, mlp_ratio, qkv_bias,
             drop_rate, attn_drop_rate, drop_path_rate, use_fourier_pos=use_fourier_pos
         )
         
-        # 2. 局主流: CNN 编码器 (来自 HDNet)
+        
         self.cnn_encoder = CNNEncoder(base_channel=hdnet_base_channel)
         
-        # CNN skip 特征的通道数: [c64, c128, c256]
+        
         cnn_skip_channels = [hdnet_base_channel * 4, hdnet_base_channel * 2, hdnet_base_channel]
         
-        # 3. 混合解码器
+        
         self.decoder = HybridDecoder(
             embed_dim, img_size, num_classes, decoder_channels, cnn_skip_channels
         )
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        # 1. 提取全局特征
-        # (B, N+1, C)
+        
+        
         transformer_features = self.transformer_encoder(x)
         
-        # 2. 提取局部特征
-        # List[(B, 192, 64, 64), (B, 96, 128, 128), (B, 48, 256, 256)]
+        
+        
         cnn_skip_features = self.cnn_encoder(x)
         
-        # 3. 解码器融合
+        
         return self.decoder(transformer_features, cnn_skip_features)
 
 

@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 import wandb
 
-# 将项目根目录添加到系统路径中
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from configs.mssdmpanet_config import config
@@ -63,7 +63,7 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device, metrics, 
         total_loss += loss.item()
 
         with torch.no_grad():
-            # 指标计算时，对logits应用sigmoid
+            
             pred1_logits = pred1.detach().cpu()
             labels_cpu = labels.cpu()
             
@@ -110,7 +110,7 @@ def validate(model, val_loader, criterion, device, metrics, epoch):
             loss = criterion(pred1, pred2, pred3, pred4, pred5, labels)
             total_loss += loss.item()
 
-            # 指标计算时，对logits应用sigmoid
+            
             pred1_logits = pred1.detach().cpu()
             labels_cpu = labels.cpu()
 
@@ -149,7 +149,7 @@ def main():
     )
 
     try:
-        # 创建数据加载器
+        
         train_loader, val_loader, test_loader = create_dataloaders(
             root_dir=config["data_root"],
             batch_size=config["batch_size"],
@@ -167,13 +167,13 @@ def main():
         if vis_loader is None:
             vis_loader = val_loader
 
-        # 模型初始化
+        
         model = MSSDMPA_Net(
             input_channels=config["input_channels"], num_classes=config["num_classes"]
         ).to(device)
         wandb.watch(model, log="all", log_freq=100)
         
-        # 计算并记录模型参数
+        
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         wandb.config.update({
@@ -181,14 +181,14 @@ def main():
             "model_trainable_params": trainable_params,
         })
 
-        # 损失函数, 优化器和学习率调度器
+        
         criterion = mssdmpanet_y_bce_loss
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config["learning_rate"],
             weight_decay=config["weight_decay"],
         )
-        # 确保配置文件中有warmup_epochs和min_lr
+        
         warmup_epochs = config.get("warmup_epochs", 10)
         min_lr = config.get("min_lr", 1e-6)
         
@@ -196,12 +196,12 @@ def main():
         cosine_scheduler = CosineAnnealingLR(optimizer, T_max=config["num_epochs"] - warmup_epochs, eta_min=min_lr)
         scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epochs])
 
-        # 初始化评价指标
-        train_metrics = SegmentationMetrics(2) # 二分类
+        
+        train_metrics = SegmentationMetrics(2) 
         val_metrics = SegmentationMetrics(2)
         test_metrics = SegmentationMetrics(2)
 
-        # 创建检查点目录和日志
+        
         checkpoint_dir = os.path.join("./checkpoints", experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
         local_log_path = os.path.join(checkpoint_dir, "train_log.txt")
@@ -225,7 +225,7 @@ def main():
             )
         )
 
-        # 训练循环
+        
         best_iou,report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
@@ -259,7 +259,7 @@ def main():
                 f"train_loss: {train_loss:.4f}, val_loss: {val_loss:.4f}, lr: {optimizer.param_groups[0]['lr']:.6g}"
             )
             
-            # 每10个epoch保存一次可视化结果
+            
             if (epoch + 1) % 10 == 0:
                 figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
                 if figure:

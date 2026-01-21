@@ -28,17 +28,17 @@ class SegmentationMetrics:
             pred: 预测结果，形状为 (N,) 或 (B, H, W)
             target: 真实标签，形状为 (N,) 或 (B, H, W)
         """
-        # 转换为numpy数组
+        
         if isinstance(pred, torch.Tensor):
             pred = pred.detach().cpu().numpy()
         if isinstance(target, torch.Tensor):
             target = target.detach().cpu().numpy()
         
-        # 展平
+        
         pred = pred.flatten()
         target = target.flatten()
         
-        # 过滤有效像素
+        
         if self.ignore_index is not None:
             mask = target != self.ignore_index
         else:
@@ -47,10 +47,10 @@ class SegmentationMetrics:
         pred = pred[mask]
         target = target[mask]
         
-        # 确保预测值在有效范围内
+        
         pred = np.clip(pred, 0, self.num_classes - 1)
         
-        # 更新混淆矩阵
+        
         for i in range(len(target)):
             self.confusion_matrix[target[i], pred[i]] += 1
     
@@ -73,21 +73,21 @@ class SegmentationMetrics:
         """计算二分类指标"""
         tn, fp, fn, tp = self.confusion_matrix.ravel()
         
-        # 基础指标
+        
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
         
-        # IoU (Intersection over Union)
+        
         iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
         
-        # F1 Score
+        
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
         
-        # Accuracy
+        
         accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
         
-        # Dice Score (等同于 F1)
+        
         dice = f1
         
         return {
@@ -108,12 +108,12 @@ class SegmentationMetrics:
         """计算多分类指标"""
         metrics = {}
         
-        # 总体准确率
+        
         total_correct = np.trace(self.confusion_matrix)
         total_samples = np.sum(self.confusion_matrix)
         metrics['accuracy'] = total_correct / total_samples if total_samples > 0 else 0.0
         
-        # 每类指标
+        
         class_metrics = {
             'precision': [],
             'recall': [],
@@ -122,34 +122,34 @@ class SegmentationMetrics:
         }
         
         for i in range(self.num_classes):
-            # 当前类的 TP, FP, FN
+            
             tp = self.confusion_matrix[i, i]
             fp = np.sum(self.confusion_matrix[:, i]) - tp
             fn = np.sum(self.confusion_matrix[i, :]) - tp
             
-            # 精确率
+            
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
             class_metrics['precision'].append(precision)
             
-            # 召回率
+            
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
             class_metrics['recall'].append(recall)
             
-            # F1 分数
+            
             f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
             class_metrics['f1'].append(f1)
             
-            # IoU
+            
             iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
             class_metrics['iou'].append(iou)
         
-        # 宏平均
+        
         metrics['macro_precision'] = np.mean(class_metrics['precision'])
         metrics['macro_recall'] = np.mean(class_metrics['recall'])
         metrics['macro_f1'] = np.mean(class_metrics['f1'])
         metrics['macro_iou'] = np.mean(class_metrics['iou'])
         
-        # 加权平均（按类别样本数量加权）
+        
         class_support = np.sum(self.confusion_matrix, axis=1)
         total_support = np.sum(class_support)
         
@@ -165,7 +165,7 @@ class SegmentationMetrics:
             metrics['weighted_f1'] = 0.0
             metrics['weighted_iou'] = 0.0
         
-        # 每类详细指标
+        
         for i in range(self.num_classes):
             metrics[f'class_{i}_precision'] = class_metrics['precision'][i]
             metrics[f'class_{i}_recall'] = class_metrics['recall'][i]
@@ -234,7 +234,7 @@ class MetricsTracker:
         self.num_classes = num_classes
         self.track_loss = track_loss
         
-        # 指标计算器
+        
         self.seg_metrics = SegmentationMetrics(num_classes)
         
         if track_loss:
@@ -257,15 +257,15 @@ class MetricsTracker:
             target: 真实标签
             loss: 损失值（可选）
         """
-        # 如果pred是logits，转换为类别预测
+        
         if isinstance(pred, torch.Tensor) and pred.dim() > 1:
-            if pred.shape[1] > 1:  # 多分类输出
+            if pred.shape[1] > 1:  
                 pred = torch.argmax(pred, dim=1)
         
-        # 更新分割指标
+        
         self.seg_metrics.update(pred, target)
         
-        # 更新损失指标
+        
         if loss is not None and self.track_loss:
             batch_size = target.shape[0] if hasattr(target, 'shape') else 1
             self.loss_metrics.update(loss, batch_size)
@@ -303,7 +303,7 @@ class MetricsTracker:
         return summary
 
 
-# 辅助函数
+
 def calculate_metrics(pred: Union[torch.Tensor, np.ndarray], 
                      target: Union[torch.Tensor, np.ndarray],
                      num_classes: int = 2) -> Dict[str, float]:
@@ -340,7 +340,7 @@ def print_metrics(metrics: Dict[str, float], prefix: str = ""):
                 print(f"  {key}: {value}")
 
 
-# 用于向后兼容的类别别名
+
 class BuildingSegmentationMetrics(SegmentationMetrics):
     """建筑物分割指标类（向后兼容）"""
     

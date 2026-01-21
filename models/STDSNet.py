@@ -23,13 +23,13 @@ class GCFM(nn.Module):
         )
 
     def forward(self, x):
-        # As per equation (2)
+        
         query = self.conv1(x).view(x.size(0), self.num_channels, -1)
         key = self.conv2(x).view(x.size(0), self.num_channels, -1).permute(0, 2, 1)
         correlation_matrix = torch.bmm(query, key)
         correlation_matrix = F.softmax(correlation_matrix, dim=-1)
 
-        # As per equation (3)
+        
         x_up = F.interpolate(
             x, scale_factor=self.k, mode="bilinear", align_corners=True
         )
@@ -40,7 +40,7 @@ class GCFM(nn.Module):
             x.size(0), self.num_channels, x_up.size(2), x_up.size(3)
         )
 
-        # Residual connection and final convolution
+        
         output = self.fusion_conv(fused_features) + x_up
         return output
 
@@ -51,7 +51,7 @@ class GCM(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        # As per equation (4)
+        
         self.gate_conv = nn.Sequential(
             nn.Conv2d(in_channels + 1, in_channels, kernel_size=1),
             nn.ReLU(),
@@ -59,21 +59,21 @@ class GCM(nn.Module):
             nn.Sigmoid(),
         )
 
-        # As per equation (5)
+        
         self.out_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
     def forward(self, high_level_features, low_level_features):
-        # high_level_features: X (from deeper layer)
-        # low_level_features: T (from shallower layer)
+        
+        
 
-        # Concatenate and compute attention map A
+        
         combined = torch.cat([high_level_features, low_level_features], dim=1)
         attention_map = self.gate_conv(combined)
 
-        # Gating and residual connection
+        
         gated_features = high_level_features * attention_map + high_level_features
 
-        # Final convolution
+        
         output = self.out_conv(gated_features)
         return output
 
@@ -81,7 +81,7 @@ class GCM(nn.Module):
 class GlobalStream(nn.Module):
     def __init__(self, encoder_channels, decoder_channels=512):
         super(GlobalStream, self).__init__()
-        self.in_channels = encoder_channels  # [128, 256, 512, 1024]
+        self.in_channels = encoder_channels  
 
         self.conv_e4 = nn.Conv2d(self.in_channels[3], decoder_channels, 1)
         self.conv_e3 = nn.Conv2d(self.in_channels[2], decoder_channels, 1)
@@ -99,12 +99,12 @@ class GlobalStream(nn.Module):
 
         g1 = self.conv_e4(e4)
 
-        # Fusion with skip connections
+        
         g2 = self.gcf_k2(g1) + self.conv_e3(e3)
         g3 = self.gcf_k4(g1) + self.conv_e2(e2)
         g4 = self.gcf_k8(g1) + self.conv_e1(e1)
 
-        # Upsample G2 and G3 to match G4's resolution
+        
         g2_up = F.interpolate(
             g2, size=g4.shape[2:], mode="bilinear", align_corners=True
         )
@@ -112,7 +112,7 @@ class GlobalStream(nn.Module):
             g3, size=g4.shape[2:], mode="bilinear", align_corners=True
         )
 
-        # Concatenate and final conv
+        
         g_prime = self.fusion_conv(torch.cat([g2_up, g3_up, g4], dim=1))
         return g_prime
 
@@ -120,15 +120,15 @@ class GlobalStream(nn.Module):
 class ShapeStream(nn.Module):
     def __init__(self, encoder_channels, decoder_channels=128):
         super(ShapeStream, self).__init__()
-        self.in_channels = encoder_channels  # [128, 256, 512, 1024]
+        self.in_channels = encoder_channels  
 
-        # Prepare S1, S2, S3, S4 as per paper
+        
         self.conv_s1 = nn.Conv2d(self.in_channels[0], decoder_channels, 1)
         self.conv_s2 = nn.Conv2d(self.in_channels[1], 1, 1)
         self.conv_s3 = nn.Conv2d(self.in_channels[2], 1, 1)
         self.conv_s4 = nn.Conv2d(self.in_channels[3], 1, 1)
 
-        # Three cascaded GCMs
+        
         self.gcm1 = GCM(decoder_channels, decoder_channels)
         self.gcm2 = GCM(decoder_channels, decoder_channels)
         self.gcm3 = GCM(decoder_channels, decoder_channels)
@@ -162,7 +162,7 @@ class STDSNet(nn.Module):
     def __init__(self, num_classes, image_size, pretrained=True):
         super(STDSNet, self).__init__()
 
-        # 1. Encoder (Swin-B)
+        
         self.encoder = SwinTransformer(
             img_size=image_size,
             embed_dim=128,
@@ -184,13 +184,13 @@ class STDSNet(nn.Module):
 
         encoder_channels = [128, 256, 512, 1024]
 
-        # 2. Global Stream Decoder
+        
         self.global_stream = GlobalStream(encoder_channels, decoder_channels=512)
 
-        # 3. Shape Stream Decoder
+        
         self.shape_stream = ShapeStream(encoder_channels, decoder_channels=128)
 
-        # Classifier heads
+        
         self.global_classifier = nn.Conv2d(512, num_classes, kernel_size=1)
         self.shape_classifier = nn.Conv2d(128, num_classes, kernel_size=1)
 
@@ -217,10 +217,10 @@ class STDSNet(nn.Module):
 
         if x.dim() == 4:
             if x.shape[1] == x.shape[-1]:
-                # timm channels-last output: (B, H, W, C)
+                
                 B, H, W, C = x.shape
             else:
-                # timm channels-first output: (B, C, H, W)
+                
                 B, C, H, W = x.shape
                 x = x.permute(0, 2, 3, 1).contiguous()
                 C = x.shape[-1]
@@ -266,15 +266,15 @@ class STDSNet(nn.Module):
 
         e1, e2, e3, e4 = features
 
-        # Decoder forward pass
+        
         global_stream_out = self.global_stream(features)
         shape_stream_out = self.shape_stream(features)
 
-        # Final predictions
+        
         global_pred = self.global_classifier(global_stream_out)
         shape_pred = self.shape_classifier(shape_stream_out)
 
-        # Upsample to original image size
+        
         global_pred = F.interpolate(
             global_pred, size=input_size, mode="bilinear", align_corners=True
         )

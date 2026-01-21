@@ -12,13 +12,13 @@ def gen_sign(secret, timestamp):
     """
     根据时间戳和密钥生成签名
     """
-    # 拼接签名字符串
+    
     string_to_sign = f'{timestamp}\n{secret}'
     
-    # 使用 HMAC-SHA256 加密
+    
     hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod='sha256').digest()
     
-    # Base64 编码
+    
     sign = base64.b64encode(hmac_code).decode('utf-8')
     
     return sign
@@ -27,13 +27,13 @@ def gen_sign(secret, timestamp):
 def send_message(title, content):
     """发送一个带有签名的消息到飞书。"""
     try:
-        # 1. 获取当前时间戳
+        
         timestamp = str(int(time.time()))
         
-        # 2. 生成签名
+        
         sign = gen_sign(FEISHU_SECRET, timestamp)
 
-        # 3. 构造带有 timestamp 和 sign 的 payload
+        
         payload = {
             "timestamp": timestamp,
             "sign": sign,

@@ -18,11 +18,11 @@ import matplotlib.pyplot as plt
 from configs.unetformer_config import config
 from models.UNetFormer import UNetFormer
 
-# 导入新的 utils4train 工具
+
 from utils4train.data_process import (
     create_dataloaders,
     create_vis_dataloader,
-    # 移除了 get_train_augmentations, get_mild_augmentations, BuildingSegmentationDataset
+    
 )
 from utils4train.metrics import SegmentationMetrics
 from utils4train.checkpoint import save_checkpoint
@@ -67,7 +67,7 @@ def train_one_epoch(
 
         optimizer.zero_grad()
         with autocast():
-            # UNetFormer 在训练时返回 (main_output, aux_output)
+            
             main_output, aux_output = model(images)
             
             main_loss = criterion(main_output, labels)
@@ -82,7 +82,7 @@ def train_one_epoch(
         seg_loss_total += main_loss.item()
         aux_loss_total += aux_loss.item()
 
-        # 指标计算基于主输出
+        
         preds = torch.argmax(main_output, dim=1).cpu().numpy()
         targets = labels.cpu().numpy()
         metrics.update(preds, targets)
@@ -109,7 +109,7 @@ def validate(model, val_loader, criterion, device, metrics, epoch):
     model.eval()
     total_loss = 0.0
     seg_loss_total = 0.0
-    aux_loss_total = 0.0  # Eval 模式下 Aux Loss 为 0
+    aux_loss_total = 0.0  
     metrics.reset()
 
     with torch.no_grad():
@@ -119,7 +119,7 @@ def validate(model, val_loader, criterion, device, metrics, epoch):
             labels = batch["label"].to(device)
 
             with autocast():
-                # UNetFormer 在 eval 模式下只返回 main_output
+                
                 main_output = model(images)
                 main_loss = criterion(main_output, labels)
                 loss = main_loss
@@ -150,7 +150,7 @@ def main():
     set_seed(config["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # W&B实验看板初始化
+    
     experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
     wandb.init(
         project=config["project_name"],
@@ -161,14 +161,14 @@ def main():
     )
 
     try:
-        # --- 数据加载 (修改点：移除动态增强) ---
-        # 直接调用 create_dataloaders，并将 augment 设置为 False
+        
+        
         train_loader, val_loader, test_loader = create_dataloaders(
             root_dir=config["data_root"],
             batch_size=config["batch_size"],
             num_workers=config["num_workers"],
             image_size=config["image_size"],
-            augment=False,  # <-- 关键改动：训练集不使用增强
+            augment=False,  
             use_nir=config["use_nir"],
         )
         
@@ -180,9 +180,9 @@ def main():
         )
         if vis_loader is None:
             vis_loader = val_loader
-        # --- 数据加载修改结束 ---
+        
 
-        # 创建模型
+        
         model = UNetFormer(
             backbone_name=config["backbone"],
             pretrained=config["pretrained"],
@@ -192,7 +192,7 @@ def main():
         model = model.to(device)
         wandb.watch(model, log="all", log_freq=100)
 
-        # 计算并记录模型参数量
+        
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         wandb.config.update(
@@ -203,7 +203,7 @@ def main():
             }
         )
 
-        # 损失函数和优化器
+        
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(
             model.parameters(),
@@ -211,7 +211,7 @@ def main():
             weight_decay=config["weight_decay"],
         )
         
-        # 学习率调度器 (新范式)
+        
         warmup_scheduler = LinearLR(
             optimizer,
             start_factor=0.01,
@@ -229,19 +229,19 @@ def main():
             milestones=[config["warmup_epochs"]],
         )
         
-        # 混合精度
+        
         scaler = GradScaler()
 
-        # 初始化评价指标
+        
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
         test_metrics = SegmentationMetrics(config["num_classes"])
 
-        # 创建检查点目录
+        
         checkpoint_dir = os.path.join("./checkpoints", experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-        # 本地日志配置
+        
         local_log_path = os.path.join(checkpoint_dir, "train_log.txt")
         logging.basicConfig(
             level=logging.INFO,
@@ -256,7 +256,7 @@ def main():
         logging.info(
             f"模型: {config['model_name']}, 总参数量: {total_params:,}, 可训练参数量: {trainable_params:,}"
         )
-        logging.info("数据增强: 已禁用 (仅使用Resize和Normalize)") # <-- 提示
+        logging.info("数据增强: 已禁用 (仅使用Resize和Normalize)") 
         start_time = datetime.now()
         send_message(
             title=f"实验开始: {experiment_name}",
@@ -267,21 +267,21 @@ def main():
                 f"可训练参数: {trainable_params:,}\n"
                 f"训练轮数: {config['num_epochs']}\n"
                 f"学习率: {config['learning_rate']}\n"
-                f"数据增强: 禁用\n" # <-- 提示
+                f"数据增强: 禁用\n" 
             )
         )
 
-        # 训练循环
+        
         best_iou, report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
         
         for epoch in range(config["num_epochs"]):
-            # --- 移除动态数据加载器切换 ---
+            
             
             train_total, train_seg, train_aux, train_result = train_one_epoch(
                 model,
-                train_loader, # <-- 直接使用固定的 train_loader
+                train_loader, 
                 criterion,
                 optimizer,
                 device,
@@ -297,7 +297,7 @@ def main():
 
             scheduler.step()
 
-            # 使用 wandb.log 记录 (新范式)
+            
             wandb.log(
                 {   
                     "Comparison Board/IoU": val_result["iou"],
@@ -309,7 +309,7 @@ def main():
                     "Train_info/Loss/Val": val_total,
                     "Train_info/Seg_Loss/Train": train_seg,
                     "Train_info/Seg_Loss/Val": val_seg,
-                    "Train_info/Aux_Loss/Train": train_aux, # 对应 UNetFormer 辅助损失
+                    "Train_info/Aux_Loss/Train": train_aux, 
                     "Train_info/Aux_Loss/Val": val_aux,
                     "Train_info/IoU/Train": train_result["iou"],
                     "Train_info/IoU/Val": val_result["iou"],
@@ -327,14 +327,14 @@ def main():
                 f"lr: {optimizer.param_groups[0]['lr']:.6g}"
             )
 
-            # 每10个epoch保存一次可视化结果
+            
             if (epoch + 1) % 10 == 0:
                 figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
                 if figure:
                     wandb.log({"Prediction_Summary": wandb.Image(figure)})
                     plt.close(figure)
 
-            # 保存最佳模型 (新范式)
+            
             if val_result["iou"] > best_iou:
                 if val_result["iou"] > 0.73 and val_result["iou"] - report_iou > 0.01:
                     report_iou = val_result["iou"]
@@ -356,16 +356,16 @@ def main():
                 save_checkpoint(model, optimizer, epoch, best_iou, best_model_path)
                 logging.info(f"New best model saved at epoch {best_epoch} with IoU: {best_iou:.4f}")
 
-            # if (epoch + 1) % 10 == 0 and epoch > 100:
-            #     checkpoint_path = os.path.join(
-            #         checkpoint_dir, f"checkpoint_epoch_{epoch+1}.pth"
-            #     )
-            #     save_checkpoint(model, optimizer, epoch, best_iou, checkpoint_path)
+            
+            
+            
+            
+            
 
         wandb.summary["best_iou"] = best_iou
         wandb.summary["best_epoch"] = best_epoch
 
-        # 测试
+        
         if os.path.exists(best_model_path):
             checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])

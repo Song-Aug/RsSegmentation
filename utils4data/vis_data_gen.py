@@ -15,14 +15,14 @@ def create_city_stratified_dataset(source_root, target_root, samples_per_city=2)
         samples_per_city (int): 每个城市抽取的样本数量
     """
     source_path = Path(source_root)
-    # 目标目录将在源数据的上一级创建，名为 'Vis'
+    
     target_path = Path(target_root) / 'Vis'
     
     print(f"创建可视化数据集: {target_path}")
     print(f"从源目录: {source_path}")
     print(f"每个城市抽样数量: {samples_per_city}")
 
-    # --- 1. 扫描并按城市分组 ---
+    
     source_image_dir = source_path / 'image'
     if not source_image_dir.exists():
         print(f"错误: 图像目录不存在 -> {source_image_dir}")
@@ -35,7 +35,7 @@ def create_city_stratified_dataset(source_root, target_root, samples_per_city=2)
 
     print(f"\n找到了 {len(city_files)} 个城市: {list(city_files.keys())}")
 
-    # --- 2. 从每个城市抽样 ---
+    
     selected_files = []
     for city, files in city_files.items():
         if len(files) >= samples_per_city:
@@ -48,11 +48,11 @@ def create_city_stratified_dataset(source_root, target_root, samples_per_city=2)
 
     print(f"\n总共选中了 {len(selected_files)} 张图像用于可视化。")
 
-    # --- 3. 复制文件到新目录 ---
+    
     target_image_dir = target_path / 'image'
     target_label_dir = target_path / 'label'
     
-    # 清理旧目录（如果存在）
+    
     if target_path.exists():
         print(f"清理已存在的可视化目录: {target_path}")
         shutil.rmtree(target_path)
@@ -63,9 +63,9 @@ def create_city_stratified_dataset(source_root, target_root, samples_per_city=2)
     source_label_dir = source_path / 'label'
     
     for file_name in tqdm(selected_files, desc="复制文件中"):
-        # 复制图像
+        
         shutil.copy2(source_image_dir / file_name, target_image_dir / file_name)
-        # 复制标签
+        
         shutil.copy2(source_label_dir / file_name, target_label_dir / file_name)
         
     print("\n可视化数据集创建成功！")
@@ -74,10 +74,10 @@ def create_city_stratified_dataset(source_root, target_root, samples_per_city=2)
 if __name__ == '__main__':
     random.seed(42)
     
-    # --- 配置路径 ---
-    # 源 Test 目录
+    
+    
     source_test_dir = "/mnt/data1/rove/asset/GF7_Building/3Bands/Test"
-    # 整个数据集的根目录
+    
     dataset_root = "/mnt/data1/rove/asset/GF7_Building/3Bands"
     
     create_city_stratified_dataset(

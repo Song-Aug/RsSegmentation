@@ -26,12 +26,12 @@ class Upsample(nn.Module):
         return F.interpolate(x, scale_factor=self.scale_factor, mode=self.mode, align_corners=True, recompute_scale_factor=True)
 
 
-# Index Pooling Module（索引池化模块）
+
 class pool(nn.Module):
     def __init__(self, channels):
         super(pool, self).__init__()
         self.channels = channels
-        # 在适当的设备上初始化权重
+        
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.weight1 = torch.zeros((channels, 1, 2, 2), device=device)
         self.weight2 = torch.zeros((channels, 1, 2, 2), device=device)
@@ -44,7 +44,7 @@ class pool(nn.Module):
 
     def forward(self, x):
         device = x.device
-        # 将权重移动到与输入相同的设备
+        
         self.weight1 = self.weight1.to(device)
         self.weight2 = self.weight2.to(device)
         self.weight3 = self.weight3.to(device)
@@ -58,7 +58,7 @@ class pool(nn.Module):
         return x1, x2, x3, x4
 
 
-# DAMIP Module (Dilated Attention Multi-Index Pooling)（空洞注意力多索引池化模块）
+
 class attn_pool(nn.Module):
     def __init__(self, feature_channels):
         super(attn_pool, self).__init__()
@@ -87,7 +87,7 @@ class attn_pool(nn.Module):
         return mat
 
 
-# DPMG Module (Deep Pyramid Multi-path Guidance)（深度金字塔多路径引导模块）
+
 class dsup(nn.Module):
     def __init__(self, input_channels, num_classes=2):
         super(dsup, self).__init__()
@@ -103,7 +103,7 @@ class dsup(nn.Module):
         return x
 
 
-# Dilated Convolutional Block（空洞卷积块）
+
 class conv_enc(nn.Module):
     def __init__(self, in_channels, out_channels, dil):
         super(conv_enc, self).__init__()
@@ -115,7 +115,7 @@ class conv_enc(nn.Module):
         self.bn3 = nn.BatchNorm2d(out_channels)
         self.conv4 = conv3x3(out_channels, out_channels, dilation=dil)
         self.bn4 = nn.BatchNorm2d(out_channels)
-        # 输入维度匹配
+        
         self.conv0 = conv1x1(in_channels, out_channels)
 
     def forward(self, x):
@@ -129,7 +129,7 @@ class conv_enc(nn.Module):
         return F.relu(x + identity)
 
 
-# Feature Extractor（特征提取器）
+
 class enc(nn.Module):
     def __init__(self, input_channels, output_channels, dil):
         super(enc, self).__init__()
@@ -144,7 +144,7 @@ class enc(nn.Module):
         return x1, x1_out
 
 
-# DAMSCA Module (Dilated Attention Multi-Scale Channel Attention)（空洞注意力多尺度通道注意力模块）
+
 class kqcbam(nn.Module):
     def __init__(self, input_channels, scale_factor=2):
         super(kqcbam, self).__init__()
@@ -161,7 +161,7 @@ class kqcbam(nn.Module):
         return self.upsample(out)
 
 
-# Decoder Module（解码器模块）
+
 class decoder(nn.Module):
     def __init__(self, input_channels, num_classes=2):
         super(decoder, self).__init__()
@@ -180,7 +180,7 @@ class decoder(nn.Module):
         return x
 
 
-# MSSDMPA-Net Main Architecture（MSSDMPA-Net 主架构）
+
 class MSSDMPA_Net(nn.Module):
     """
     MSSDMPA-Net: Multi-Scale Spatial-Dependent Multi-Path Attention Network
@@ -211,7 +211,7 @@ class MSSDMPA_Net(nn.Module):
 
         self.decoder = decoder(960, num_classes=num_classes)
 
-        # 更新dsup模块以接受num_classes
+        
         self.path1.dp_sup = dsup(64, num_classes=num_classes)
         self.path2.dp_sup = dsup(128, num_classes=num_classes)
         self.path3.dp_sup = dsup(256, num_classes=num_classes)
@@ -251,16 +251,16 @@ def create_model(input_channels=3, num_classes=1, device='cuda'):
     return model
 
 
-# Example usage（使用示例）
+
 if __name__ == "__main__":
-    # 创建模型
+    
     model = create_model(input_channels=3, num_classes=1)
     
-    # 打印模型信息
+    
     print("MSSDMPA-Net 模型创建成功!")
     print(f"模型参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
-    # 使用随机输入测试
+    
     if torch.cuda.is_available():
         test_input = torch.randn(1, 3, 512, 512).cuda()
         with torch.no_grad():

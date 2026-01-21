@@ -25,7 +25,7 @@ class DiceLoss(nn.Module):
             targets_onehot = (
                 F.one_hot(targets.long(), num_classes).permute(0, 3, 1, 2).float()
             )
-        else:  # for binary case
+        else:  
             targets_onehot = targets.unsqueeze(1).float()
 
         intersection = torch.sum(probs * targets_onehot, dim=(0, 2, 3))
@@ -35,7 +35,7 @@ class DiceLoss(nn.Module):
 
         dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
 
-        # 返回1 - dice_score的平均值
+        
         return 1 - dice.mean()
 
 
@@ -83,7 +83,7 @@ def generate_boundary_and_weight_maps(labels, kernel_size=5, w0=10, sigma=5):
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: 边界标签 (B, 1, H, W) 和 权重图 (B, H, W)。
     """
-    # 1. 生成边界图
+    
     labels_float = labels.float().unsqueeze(1)
     padding = (kernel_size - 1) // 2
 
@@ -94,32 +94,32 @@ def generate_boundary_and_weight_maps(labels, kernel_size=5, w0=10, sigma=5):
         -labels_float, kernel_size=kernel_size, stride=1, padding=padding
     )
 
-    boundary = dilated - eroded  # Shape: (B, 1, H, W)
+    boundary = dilated - eroded  
 
-    # 2. 生成权重图 (在CPU上使用numpy计算更高效)
+    
     labels_np = labels.cpu().numpy()
     weights = np.zeros_like(labels_np, dtype=np.float32)
 
     for i in range(labels_np.shape[0]):
-        # 寻找所有前景(1)和背景(0)像素
+        
         foreground = labels_np[i] > 0
         background = ~foreground
 
-        # 如果图像中没有前景或背景，则不进行加权
+        
         if np.sum(foreground) == 0 or np.sum(background) == 0:
             weight_map = np.ones_like(labels_np[i], dtype=np.float32)
         else:
-            # 计算每个像素到最近背景像素的距离
+            
             dist_map = distance_transform_edt(foreground)
-            # 使用高斯函数和平滑因子计算权重
+            
             weight_map = w0 * np.exp(-((dist_map) ** 2) / (2 * sigma**2))
 
         weights[i] = weight_map
 
-    # 类别平衡权重 (可选，简单实现)
+    
     class_weights = np.ones_like(labels_np, dtype=np.float32)
-    # final_weights = torch.from_numpy(weights + class_weights).to(labels.device)
-    final_weights = torch.from_numpy(weights).to(labels.device) + 1  # 基础权重为1
+    
+    final_weights = torch.from_numpy(weights).to(labels.device) + 1  
 
     return boundary.float(), final_weights
 
@@ -128,7 +128,7 @@ def transcc_v2_loss(
     outputs,
     labels,
     seg_weight: float = 1.0,
-    boundary_weight: float = 1.5,  # 默认提高边界权重
+    boundary_weight: float = 1.5,  
     aux_weight: float = 0.4,
     dice_focal_ratio: float = 0.5,
     bce_dice_ratio: float = 0.5,
@@ -140,27 +140,27 @@ def transcc_v2_loss(
     """
     seg_main, boundary_main, seg_aux1, seg_aux2, boundary_aux = outputs
 
-    # --- 实例化损失函数 ---
-    loss_focal = FocalLoss(alpha=0.25, gamma=2.0)  # 使用带权重的版本
+    
+    loss_focal = FocalLoss(alpha=0.25, gamma=2.0)  
     loss_dice_seg = DiceLoss()
     loss_bce_bd = nn.BCEWithLogitsLoss()
     loss_dice_bd = DiceLoss(from_logits=False)
 
     labels_long = labels.long()
 
-    # --- 动态生成边界和权重图 ---
+    
     boundary_labels, weight_map = generate_boundary_and_weight_maps(labels)
 
-    # --- 1. 主分割损失 (Focal + Dice)，Focal应用权重 ---
+    
     seg_focal = loss_focal(seg_main, labels_long, weights=weight_map)
     seg_dice = loss_dice_seg(seg_main, labels_long)
     main_seg_loss = (1 - dice_focal_ratio) * seg_focal + dice_focal_ratio * seg_dice
 
-    # --- 2. 辅助分割损失 (Focal + Dice) ---
+    
     aux_losses = []
     for aux_seg in (seg_aux1, seg_aux2):
-        # 辅助损失不加权以简化
-        aux_focal = F.cross_entropy(aux_seg, labels_long)  # 使用简单的交叉熵
+        
+        aux_focal = F.cross_entropy(aux_seg, labels_long)  
         aux_dice = loss_dice_seg(aux_seg, labels_long)
         aux_losses.append(
             (1 - dice_focal_ratio) * aux_focal + dice_focal_ratio * aux_dice
@@ -172,7 +172,7 @@ def transcc_v2_loss(
         else torch.tensor(0.0).to(seg_main.device)
     )
 
-    # --- 3. 边界损失 (BCE + Dice) ---
+    
     bdy_main_bce = loss_bce_bd(boundary_main, boundary_labels)
     bdy_main_dice = loss_dice_bd(torch.sigmoid(boundary_main), boundary_labels)
     main_bdy_loss = (1 - bce_dice_ratio) * bdy_main_bce + bce_dice_ratio * bdy_main_dice
@@ -183,7 +183,7 @@ def transcc_v2_loss(
 
     total_boundary_loss = main_bdy_loss + aux_bdy_loss
 
-    # --- 4. 计算总损失 ---
+    
     total_loss = (
         seg_weight * main_seg_loss
         + boundary_weight * total_boundary_loss
@@ -250,7 +250,7 @@ def hdnet_loss(outputs, labels, weights=None):
     for output in bd_outputs:
         if (
             output.size()[2:] != boundary_labels.size()[2:]
-        ):  # 边界标签现在是 (B, 1, H, W)
+        ):  
             output = F.interpolate(
                 output,
                 size=boundary_labels.size()[2:],
@@ -297,7 +297,7 @@ class MSSDMPA_IoU(object):
         self.threshold = threshold
 
     def __call__(self, y_true, y_pred):
-        # y_pred是logits，需要先经过sigmoid
+        
         y_pred_probs = torch.sigmoid(y_pred)
         y_pred = (y_pred_probs > self.threshold).float()
 
@@ -315,7 +315,7 @@ def mssdmpanet_dice_coeff(y_true, y_pred):
     """
     smooth = 1.0
     y_true_f = y_true.flatten()
-    y_pred_f = torch.sigmoid(y_pred).flatten()  # 应用sigmoid
+    y_pred_f = torch.sigmoid(y_pred).flatten()  
     intersection = torch.sum(y_true_f * y_pred_f)
     return (2.0 * intersection + smooth) / (
         torch.sum(y_true_f) + torch.sum(y_pred_f) + smooth

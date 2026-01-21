@@ -33,14 +33,14 @@ def get_train_augmentations(image_size=512, use_nir=False):
                 ],
                 p=0.3,
             ),
-            # 随机擦除 (模拟遮挡)
+            
             A.CoarseDropout(
                 max_holes=8,
                 max_height=int(image_size * 0.1),
                 max_width=int(image_size * 0.1),
                 p=0.3,
             ),
-            # 归一化和转换为Tensor
+            
             A.Normalize(mean=mean, std=std),
             ToTensorV2(),
         ]
@@ -55,14 +55,14 @@ def get_mild_augmentations(image_size=512, use_nir=False):
     return A.Compose(
         [
             A.Resize(image_size, image_size, interpolation=Image.BILINEAR),
-            # 只保留基础的几何变换
+            
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.RandomRotate90(p=0.5),
-            # 可以保留轻微的颜色增强
+            
             A.RandomBrightnessContrast(p=0.2),
-            # 移除了 ElasticTransform, GridDistortion, CoarseDropout 等强力增强
-            # 归一化和转换为Tensor
+            
+            
             A.Normalize(mean=mean, std=std),
             ToTensorV2(),
         ]
@@ -140,7 +140,7 @@ class BuildingSegmentationDataset(Dataset):
             if self.transform:
                 augmented = self.transform(image=image, mask=label)
                 image = augmented["image"]
-                label = augmented["mask"].long()  # 确保是LongTensor
+                label = augmented["mask"].long()  
 
             return {"image": image, "label": label, "filename": img_file}
 

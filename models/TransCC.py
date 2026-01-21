@@ -89,10 +89,10 @@ class PatchEmbedding(nn.Module):
     
     def forward(self, x):
         B, C, H, W = x.shape
-        # 移除严格的尺寸检查，支持灵活的输入尺寸
-        # assert H == self.img_size[0] and W == self.img_size[1], \
-        #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)  # B, N, C
+        
+        
+        
+        x = self.proj(x).flatten(2).transpose(1, 2)  
         return x
 
 
@@ -104,7 +104,7 @@ class FourierPositionEmbedding(nn.Module):
 
         assert embed_dim % 4 == 0, "embed_dim must be divisible by 4 for 2D Fourier embedding"
         
-        self.freq_dim = embed_dim // 4  # 每个坐标轴使用 embed_dim/4 个频率
+        self.freq_dim = embed_dim // 4  
         
         freq_bands = torch.exp(torch.linspace(0, math.log(max_freq), self.freq_dim))
         self.register_buffer('freq_bands', freq_bands)
@@ -119,24 +119,24 @@ class FourierPositionEmbedding(nn.Module):
         """
         B, N, _ = patch_centers.shape
         
-        # 分离 x 和 y 坐标
-        x_coords = patch_centers[:, :, 0:1]  # (B, N, 1)
-        y_coords = patch_centers[:, :, 1:2]  # (B, N, 1)
         
-        # 为每个坐标生成 Fourier 特征
-        x_freqs = x_coords * self.freq_bands.unsqueeze(0).unsqueeze(0)  # (B, N, freq_dim)
-        y_freqs = y_coords * self.freq_bands.unsqueeze(0).unsqueeze(0)  # (B, N, freq_dim)
+        x_coords = patch_centers[:, :, 0:1]  
+        y_coords = patch_centers[:, :, 1:2]  
         
-        # 计算正弦和余弦嵌入
-        x_sin = torch.sin(x_freqs)  # (B, N, freq_dim)
-        x_cos = torch.cos(x_freqs)  # (B, N, freq_dim)
-        y_sin = torch.sin(y_freqs)  # (B, N, freq_dim)
-        y_cos = torch.cos(y_freqs)  # (B, N, freq_dim)
         
-        # 拼接所有 Fourier 特征
-        fourier_features = torch.cat([x_sin, x_cos, y_sin, y_cos], dim=-1)  # (B, N, embed_dim)
+        x_freqs = x_coords * self.freq_bands.unsqueeze(0).unsqueeze(0)  
+        y_freqs = y_coords * self.freq_bands.unsqueeze(0).unsqueeze(0)  
         
-        # 通过线性层投影到目标维度
+        
+        x_sin = torch.sin(x_freqs)  
+        x_cos = torch.cos(x_freqs)  
+        y_sin = torch.sin(y_freqs)  
+        y_cos = torch.cos(y_freqs)  
+        
+        
+        fourier_features = torch.cat([x_sin, x_cos, y_sin, y_cos], dim=-1)  
+        
+        
         pos_embed = self.proj(fourier_features)
         
         return pos_embed
@@ -146,25 +146,25 @@ class FourierPositionEmbedding(nn.Module):
         img_h, img_w = to_2tuple(img_size)
         patch_h, patch_w = to_2tuple(patch_size)
         
-        # 计算每个维度的 patch 数量
+        
         num_patches_h = img_h // patch_h
         num_patches_w = img_w // patch_w
         
-        # 创建网格坐标
+        
         y_coords = torch.arange(num_patches_h, dtype=torch.float32)
         x_coords = torch.arange(num_patches_w, dtype=torch.float32)
         
-        # 计算 patch 中心坐标（像素坐标）
+        
         y_centers = (y_coords + 0.5) * patch_h
         x_centers = (x_coords + 0.5) * patch_w
         
-        # 归一化到 [0, 1] 范围
+        
         y_centers = y_centers / img_h
         x_centers = x_centers / img_w
         
-        # 创建网格并展平
+        
         yy, xx = torch.meshgrid(y_centers, x_centers, indexing='ij')
-        patch_centers = torch.stack([xx.flatten(), yy.flatten()], dim=-1)  # (N, 2)
+        patch_centers = torch.stack([xx.flatten(), yy.flatten()], dim=-1)  
         
         return patch_centers
 
@@ -180,27 +180,27 @@ class Encoder(nn.Module):
         self.embed_dim = embed_dim
         self.use_fourier_pos = use_fourier_pos
         
-        # 图像块嵌入
+        
         self.patch_embed = PatchEmbedding(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
         )
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         
-        # 位置编码
+        
         if use_fourier_pos:
             self.pos_embed = FourierPositionEmbedding(embed_dim)
-            # 为 CLS token 创建可学习的位置编码
+            
             self.cls_pos_embed = nn.Parameter(torch.zeros(1, 1, embed_dim))
         else:
-            # 传统的可学习位置编码
+            
             self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches + 1, embed_dim))
         
         self.pos_drop = nn.Dropout(p=drop_rate)
         
-        # 随机深度衰减规则
+        
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         
-        # Transformer 块
+        
         self.blocks = nn.ModuleList([
             TransformerBlock(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
@@ -209,10 +209,10 @@ class Encoder(nn.Module):
             for i in range(depth)
         ])
         
-        # 最终归一化层
+        
         self.norm = norm_layer(embed_dim)
         
-        # 初始化权重
+        
         self.apply(self._init_weights)
     
     def _init_weights(self, m):
@@ -231,48 +231,48 @@ class Encoder(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape
         
-        # 图像块嵌入
-        x = self.patch_embed(x)  # B, N, C
         
-        # 添加类别令牌
+        x = self.patch_embed(x)  
+        
+        
         cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)  # B, N+1, C
+        x = torch.cat((cls_tokens, x), dim=1)  
         
-        # 添加位置编码
+        
         if self.use_fourier_pos:
-            # 获取 patch 中心坐标
+            
             patch_centers = self.pos_embed.get_patch_centers(
                 img_size=(H, W), patch_size=self.patch_size
             ).to(x.device)
             
-            # 扩展到 batch 维度
+            
             patch_centers = patch_centers.unsqueeze(0).expand(B, -1, -1)
             
-            # 计算 Fourier 位置编码
-            fourier_pos = self.pos_embed(patch_centers)  # B, N, C
             
-            # 为 patch tokens 添加 Fourier 位置编码
+            fourier_pos = self.pos_embed(patch_centers)  
+            
+            
             x[:, 1:, :] = x[:, 1:, :] + fourier_pos
             
-            # 为 CLS token 添加可学习的位置编码
+            
             x[:, 0:1, :] = x[:, 0:1, :] + self.cls_pos_embed
         else:
-            # 传统位置编码
+            
             x = x + self.pos_embed
         
         x = self.pos_drop(x)
         
-        # 存储中间层特征用于跳级连接
+        
         layer_features = []
         
-        # 通过 Transformer 块，收集中间层特征
+        
         for i, block in enumerate(self.blocks):
             x = block(x)
-            # 收集特定层的特征用于跳级连接
-            if i in [1, 3, 5]:  # 在第2, 4, 6层收集特征
-                layer_features.append(x[:, 1:, :])  # 只保存patch features，去除CLS token
+            
+            if i in [1, 3, 5]:  
+                layer_features.append(x[:, 1:, :])  
         
-        # 最终归一化
+        
         x = self.norm(x)
         
         return x, layer_features
@@ -280,12 +280,12 @@ class Encoder(nn.Module):
     def get_patch_features(self, x):
         """获取不包含 CLS token 的补丁特征"""
         features, _ = self.forward(x)
-        return features[:, 1:, :]  # 移除 CLS token
+        return features[:, 1:, :]  
     
     def get_cls_token(self, x):
         """获取 CLS token"""
         features, _ = self.forward(x)
-        return features[:, 0, :]  # 只返回 CLS token
+        return features[:, 0, :]  
 
 
 class ChannelAttention(nn.Module):
@@ -360,17 +360,17 @@ class CBAMResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(CBAMResidualBlock, self).__init__()
         
-        # 主分支
+        
         self.conv1 = ConvBlock(in_channels, out_channels, kernel_size=3, stride=stride)
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels)
         )
         
-        # CBAM 注意力
+        
         self.cbam = CBAM(out_channels)
         
-        # 跳跃连接
+        
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -418,21 +418,21 @@ class SkipConnection(nn.Module):
         B, N, encoder_channels = encoder_feat.shape
         B, decoder_channels, H, W = decoder_feat.shape
         
-        # 将编码器特征投影并重塑为2D
-        encoder_proj = self.encoder_proj(encoder_feat)  # (B, N, out_channels)
-        encoder_2d = encoder_proj.transpose(1, 2).reshape(B, -1, int(N**0.5), int(N**0.5))  # (B, out_channels, h, w)
         
-        # 上采样编码器特征到解码器特征的尺寸
+        encoder_proj = self.encoder_proj(encoder_feat)  
+        encoder_2d = encoder_proj.transpose(1, 2).reshape(B, -1, int(N**0.5), int(N**0.5))  
+        
+        
         encoder_upsampled = F.interpolate(encoder_2d, size=(H, W), mode='bilinear', align_corners=False)
         
-        # 投影解码器特征
-        decoder_proj = self.decoder_conv(decoder_feat)  # (B, out_channels, H, W)
         
-        # 特征融合
-        fused = torch.cat([encoder_upsampled, decoder_proj], dim=1)  # (B, out_channels*2, H, W)
-        fused = self.fusion_conv(fused)  # (B, out_channels, H, W)
+        decoder_proj = self.decoder_conv(decoder_feat)  
         
-        # 应用注意力机制
+        
+        fused = torch.cat([encoder_upsampled, decoder_proj], dim=1)  
+        fused = self.fusion_conv(fused)  
+        
+        
         fused = self.attention(fused)
         
         return fused
@@ -466,42 +466,42 @@ class Decoder(nn.Module):
         self.num_classes = num_classes
         self.decoder_channels = decoder_channels
         
-        # 计算特征图尺寸
-        self.feature_size = img_size // patch_size  # 512 // 16 = 32
         
-        # 将 Transformer 特征重塑为 2D 特征图的投影层
+        self.feature_size = img_size // patch_size  
+        
+        
         self.feature_proj = nn.Sequential(
             nn.Linear(embed_dim, decoder_channels[0]),
             nn.LayerNorm(decoder_channels[0])
         )
         
-        # 初始卷积层
+        
         self.initial_conv = ConvBlock(decoder_channels[0], decoder_channels[0])
         
-        # 3个 CBAM 残差块堆叠
+        
         self.cbam_blocks = nn.ModuleList([
-            CBAMResidualBlock(decoder_channels[0], decoder_channels[0]),  # 512 -> 512
-            CBAMResidualBlock(decoder_channels[1], decoder_channels[1]),  # 256 -> 256 (上采样后的通道数)
-            CBAMResidualBlock(decoder_channels[2], decoder_channels[2])   # 128 -> 128 (上采样后的通道数)
+            CBAMResidualBlock(decoder_channels[0], decoder_channels[0]),  
+            CBAMResidualBlock(decoder_channels[1], decoder_channels[1]),  
+            CBAMResidualBlock(decoder_channels[2], decoder_channels[2])   
         ])
         
-        # 上采样层（反卷积）
+        
         self.upsample_layers = nn.ModuleList([
-            # 从 32x32 -> 64x64
+            
             nn.ConvTranspose2d(decoder_channels[0], decoder_channels[1], 
                              kernel_size=4, stride=2, padding=1, bias=False),
-            # 从 64x64 -> 128x128
+            
             nn.ConvTranspose2d(decoder_channels[1], decoder_channels[2], 
                              kernel_size=4, stride=2, padding=1, bias=False),
-            # 从 128x128 -> 256x256
+            
             nn.ConvTranspose2d(decoder_channels[2], decoder_channels[3], 
                              kernel_size=4, stride=2, padding=1, bias=False),
-            # 从 256x256 -> 512x512
+            
             nn.ConvTranspose2d(decoder_channels[3], decoder_channels[3], 
                              kernel_size=4, stride=2, padding=1, bias=False)
         ])
         
-        # 批归一化层
+        
         self.upsample_bn = nn.ModuleList([
             nn.BatchNorm2d(decoder_channels[1]),
             nn.BatchNorm2d(decoder_channels[2]),
@@ -509,31 +509,31 @@ class Decoder(nn.Module):
             nn.BatchNorm2d(decoder_channels[3])
         ])
         
-        # 跳级连接模块 - 融合编码器多层特征
+        
         self.skip_connections = nn.ModuleList([
-            # 第1个跳级连接: 64x64 分辨率，融合第2层编码器特征
+            
             SkipConnection(embed_dim, decoder_channels[1], decoder_channels[1]),
-            # 第2个跳级连接: 128x128 分辨率，融合第4层编码器特征  
+            
             SkipConnection(embed_dim, decoder_channels[2], decoder_channels[2]),
-            # 第3个跳级连接: 256x256 分辨率，融合第6层编码器特征
+            
             SkipConnection(embed_dim, decoder_channels[3], decoder_channels[3])
         ])
         
-        # 特征聚合模块
+        
         self.feature_aggregators = nn.ModuleList([
             FeatureAggregator(decoder_channels[1], decoder_channels[1]),
             FeatureAggregator(decoder_channels[2], decoder_channels[2]), 
             FeatureAggregator(decoder_channels[3], decoder_channels[3])
         ])
         
-        # 最终分类头
+        
         self.final_conv = nn.Sequential(
             ConvBlock(decoder_channels[3], decoder_channels[3] // 2),
             ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4),
             nn.Conv2d(decoder_channels[3] // 4, num_classes, kernel_size=1)
         )
         
-        # 初始化权重
+        
         self.apply(self._init_weights)
     
     def _init_weights(self, m):
@@ -559,54 +559,54 @@ class Decoder(nn.Module):
         """
         B, N_plus_1, C = encoder_features.shape
         
-        # 移除 CLS token，只保留 patch features
-        patch_features = encoder_features[:, 1:, :]  # (B, N, C)
+        
+        patch_features = encoder_features[:, 1:, :]  
         N = patch_features.shape[1]
         
-        # 投影到解码器维度
-        features = self.feature_proj(patch_features)  # (B, N, decoder_channels[0])
         
-        # 重塑为 2D 特征图
-        H = W = int(N ** 0.5)  # 假设是正方形特征图
+        features = self.feature_proj(patch_features)  
+        
+        
+        H = W = int(N ** 0.5)  
         features = features.transpose(1, 2).reshape(B, self.decoder_channels[0], H, W)
         
-        # 初始卷积
-        x = self.initial_conv(features)  # (B, 512, 32, 32)
         
-        # ====== 解码器主体 + 跳级连接 ======
+        x = self.initial_conv(features)  
         
-        # 第一个 CBAM 块 + 上采样 (32x32 -> 64x64)
-        x = self.cbam_blocks[0](x)  # (B, 512, 32, 32)
-        x = F.relu(self.upsample_bn[0](self.upsample_layers[0](x)))  # (B, 256, 64, 64)
         
-        # 跳级连接1: 融合第2层编码器特征
+        
+        
+        x = self.cbam_blocks[0](x)  
+        x = F.relu(self.upsample_bn[0](self.upsample_layers[0](x)))  
+        
+        
         if len(layer_features) >= 1:
-            x = self.skip_connections[0](layer_features[0], x)  # 融合编码器第2层特征
-        x = self.feature_aggregators[0](x)  # 特征聚合
+            x = self.skip_connections[0](layer_features[0], x)  
+        x = self.feature_aggregators[0](x)  
         
-        # 第二个 CBAM 块 + 上采样 (64x64 -> 128x128)
-        x = self.cbam_blocks[1](x)  # (B, 256, 64, 64)
-        x = F.relu(self.upsample_bn[1](self.upsample_layers[1](x)))  # (B, 128, 128, 128)
         
-        # 跳级连接2: 融合第4层编码器特征
+        x = self.cbam_blocks[1](x)  
+        x = F.relu(self.upsample_bn[1](self.upsample_layers[1](x)))  
+        
+        
         if len(layer_features) >= 2:
-            x = self.skip_connections[1](layer_features[1], x)  # 融合编码器第4层特征
-        x = self.feature_aggregators[1](x)  # 特征聚合
+            x = self.skip_connections[1](layer_features[1], x)  
+        x = self.feature_aggregators[1](x)  
         
-        # 第三个 CBAM 块 + 上采样 (128x128 -> 256x256)
-        x = self.cbam_blocks[2](x)  # (B, 128, 128, 128)
-        x = F.relu(self.upsample_bn[2](self.upsample_layers[2](x)))  # (B, 64, 256, 256)
         
-        # 跳级连接3: 融合第6层编码器特征
+        x = self.cbam_blocks[2](x)  
+        x = F.relu(self.upsample_bn[2](self.upsample_layers[2](x)))  
+        
+        
         if len(layer_features) >= 3:
-            x = self.skip_connections[2](layer_features[2], x)  # 融合编码器第6层特征
-        x = self.feature_aggregators[2](x)  # 特征聚合
+            x = self.skip_connections[2](layer_features[2], x)  
+        x = self.feature_aggregators[2](x)  
         
-        # 最终上采样到原图尺寸 (256x256 -> 512x512)
-        x = F.relu(self.upsample_bn[3](self.upsample_layers[3](x)))  # (B, 64, 512, 512)
         
-        # 最终分类
-        output = self.final_conv(x)  # (B, num_classes, 512, 512)
+        x = F.relu(self.upsample_bn[3](self.upsample_layers[3](x)))  
+        
+        
+        output = self.final_conv(x)  
         
         return output
 
@@ -643,7 +643,7 @@ class TransCC(nn.Module):
         self.num_classes = num_classes
         self.embed_dim = embed_dim
         
-        # Transformer 编码器
+        
         self.encoder = Encoder(
             img_size=img_size,
             patch_size=patch_size,
@@ -659,7 +659,7 @@ class TransCC(nn.Module):
             use_fourier_pos=use_fourier_pos
         )
         
-        # CNN 解码器
+        
         self.decoder = Decoder(
             embed_dim=embed_dim,
             patch_size=patch_size,
@@ -668,7 +668,7 @@ class TransCC(nn.Module):
             decoder_channels=decoder_channels
         )
         
-        # 初始化权重
+        
         self.apply(self._init_weights)
         
     def _init_weights(self, m):
@@ -695,11 +695,11 @@ class TransCC(nn.Module):
         Returns:
             output: (B, num_classes, H, W) - 分割结果
         """
-        # 编码器前向传播，获取最终特征和中间层特征
-        encoder_features, layer_features = self.encoder(x)  # (B, N+1, embed_dim), List[(B, N, embed_dim)]
         
-        # 解码器前向传播，使用跳级连接
-        output = self.decoder(encoder_features, layer_features)  # (B, num_classes, H, W)
+        encoder_features, layer_features = self.encoder(x)  
+        
+        
+        output = self.decoder(encoder_features, layer_features)  
         
         return output
     

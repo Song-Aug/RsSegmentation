@@ -113,21 +113,21 @@ class GlobalLocalAttention(nn.Module):
         self.relative_pos_embedding = relative_pos_embedding
 
         if self.relative_pos_embedding:
-            # define a parameter table of relative position bias
+            
             self.relative_position_bias_table = nn.Parameter(
-                torch.zeros((2 * window_size - 1) * (2 * window_size - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
+                torch.zeros((2 * window_size - 1) * (2 * window_size - 1), num_heads))  
 
-            # get pair-wise relative position index for each token inside the window
+            
             coords_h = torch.arange(self.ws)
             coords_w = torch.arange(self.ws)
-            coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
-            coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
-            relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
-            relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-            relative_coords[:, :, 0] += self.ws - 1  # shift to start from 0
+            coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  
+            coords_flatten = torch.flatten(coords, 1)  
+            relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  
+            relative_coords = relative_coords.permute(1, 2, 0).contiguous()  
+            relative_coords[:, :, 0] += self.ws - 1  
             relative_coords[:, :, 1] += self.ws - 1
             relative_coords[:, :, 0] *= 2 * self.ws - 1
-            relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
+            relative_position_index = relative_coords.sum(-1)  
             self.register_buffer("relative_position_index", relative_position_index)
 
             trunc_normal_(self.relative_position_bias_table, std=.02)
@@ -160,8 +160,8 @@ class GlobalLocalAttention(nn.Module):
 
         if self.relative_pos_embedding:
             relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-                self.ws * self.ws, self.ws * self.ws, -1)  # Wh*Ww,Wh*Ww,nH
-            relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+                self.ws * self.ws, self.ws * self.ws, -1)  
+            relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  
             dots += relative_position_bias.unsqueeze(0)
 
         attn = dots.softmax(dim=-1)
@@ -178,7 +178,7 @@ class GlobalLocalAttention(nn.Module):
         out = out + local
         out = self.pad_out(out)
         out = self.proj(out)
-        # print(out.size())
+        
         out = out[:, :, :H, :W]
 
         return out
@@ -363,7 +363,7 @@ class UNetFormer(nn.Module):
         self.backbone = timm.create_model(backbone_name, features_only=True, output_stride=32,
                                           out_indices=(1, 2, 3, 4), pretrained=pretrained)
         
-        # 如果需要4通道输入，修改backbone的第一层
+        
         if in_channels != 3:
             self._modify_backbone_input(in_channels)
         
@@ -373,11 +373,11 @@ class UNetFormer(nn.Module):
     
     def _modify_backbone_input(self, in_channels):
         """修改backbone的输入层以支持不同通道数"""
-        # 获取第一个卷积层
+        
         first_conv_name = None
         first_conv = None
         
-        # 常见的第一层卷积名称
+        
         for name in ['conv_stem', 'conv1', 'conv_first', 'features.0']:
             if hasattr(self.backbone, name):
                 first_conv = getattr(self.backbone, name)
@@ -385,7 +385,7 @@ class UNetFormer(nn.Module):
                 break
         
         if first_conv is None:
-            # 如果找不到，尝试递归查找
+            
             for name, module in self.backbone.named_modules():
                 if isinstance(module, nn.Conv2d) and module.in_channels == 3:
                     first_conv = module
@@ -393,7 +393,7 @@ class UNetFormer(nn.Module):
                     break
         
         if first_conv is not None and isinstance(first_conv, nn.Conv2d):
-            # 创建新的卷积层
+            
             new_conv = nn.Conv2d(
                 in_channels, 
                 first_conv.out_channels,
@@ -403,24 +403,24 @@ class UNetFormer(nn.Module):
                 bias=first_conv.bias is not None
             )
             
-            # 初始化权重
+            
             with torch.no_grad():
                 if in_channels > 3:
-                    # 复制RGB权重
+                    
                     new_conv.weight[:, :3, :, :] = first_conv.weight
-                    # 额外通道使用RGB平均值初始化
+                    
                     for i in range(3, in_channels):
                         new_conv.weight[:, i:i+1, :, :] = torch.mean(first_conv.weight, dim=1, keepdim=True)
                 else:
-                    # 如果输入通道数小于3，截取权重
+                    
                     new_conv.weight = first_conv.weight[:, :in_channels, :, :]
                 
                 if first_conv.bias is not None:
                     new_conv.bias = first_conv.bias
             
-            # 替换第一层
+            
             if '.' in first_conv_name:
-                # 处理嵌套属性
+                
                 parts = first_conv_name.split('.')
                 parent = self.backbone
                 for part in parts[:-1]:

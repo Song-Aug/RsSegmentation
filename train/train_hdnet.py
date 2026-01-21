@@ -15,7 +15,7 @@ from tqdm import tqdm
 import wandb
 import matplotlib.pyplot as plt
 
-# 导入项目模块
+
 from configs.hdnet_config import config
 from models.HDNet import HDNet
 from utils4train.data_process import create_dataloaders, create_vis_dataloader
@@ -23,7 +23,7 @@ from utils4train.metrics import SegmentationMetrics
 from utils4train.losses import hdnet_loss
 from utils4train.checkpoint import save_checkpoint
 from utils4train.visualization import create_hdnet_sample_images
-from utils4train.trainer import test  # 假设 test 函数在 trainer.py 中
+from utils4train.trainer import test  
 from utils4train.alerts_by_lark import send_message
 
 
@@ -135,7 +135,7 @@ def main():
     )
 
     try:
-        # 数据加载
+        
         train_loader, val_loader, test_loader = create_dataloaders(
             root_dir=config["data_root"],
             batch_size=config["batch_size"],
@@ -153,7 +153,7 @@ def main():
         if vis_loader is None:
             vis_loader = val_loader
 
-        # 模型初始化
+        
         model = HDNet(
             base_channel=config["base_channel"], num_classes=config["num_classes"]
         ).to(device)
@@ -168,7 +168,7 @@ def main():
             }
         )
 
-        # 优化器和学习率调度器 (升级版)
+        
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config["learning_rate"],
@@ -189,12 +189,12 @@ def main():
         )
         scaler = GradScaler()
 
-        # 初始化指标计算类
+        
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
         test_metrics = SegmentationMetrics(config["num_classes"])
 
-        # 创建检查点目录和日志
+        
         checkpoint_dir = os.path.join("./checkpoints", experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
         logging.basicConfig(
@@ -220,7 +220,7 @@ def main():
             ),
         )
 
-        # --- 训练循环 ---
+        
         best_iou, report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
@@ -293,13 +293,13 @@ def main():
         wandb.summary["best_iou"] = best_iou
         wandb.summary["best_epoch"] = best_epoch
 
-        # --- 测试阶段 ---
+        
         logging.info("开始测试最佳模型...")
         if os.path.exists(best_model_path):
             checkpoint = torch.load(best_model_path, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint["model_state_dict"])
 
-            # HDNet的test函数在trainer.py中没有区分，我们复用validate
+            
             _, test_result = validate(
                 model, test_loader, device, test_metrics, best_epoch
             )

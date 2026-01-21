@@ -152,12 +152,12 @@ def test(model, test_loader, device, metrics):
 
 
 def main():
-    # 设置随机种子
+    
     set_seed(config["seed"])
-    # 设置计算设备
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # W&B实验看板初始化
+    
     experiment_name = f"{config['model_name']}_{datetime.now().strftime('%m%d')}"
     wandb.init(
         project="Building-Segmentation-3Bands",
@@ -184,7 +184,7 @@ def main():
         train_dataset_mild = BuildingSegmentationDataset(
             root_dir=config["data_root"], split='Train', transform=mild_aug, use_nir=config["use_nir"]
         )
-        # 4. 创建两个对应的训练数据加载器
+        
         train_loader_strong = torch.utils.data.DataLoader(
             train_dataset_strong, batch_size=config["batch_size"], shuffle=True,
             num_workers=config["num_workers"], pin_memory=True, drop_last=True
@@ -204,7 +204,7 @@ def main():
         if vis_loader is None:
             vis_loader = val_loader
 
-        # 模型初始化
+        
         model = create_transcc_v3(
             {
                 "img_size": config["image_size"],
@@ -218,7 +218,7 @@ def main():
         model = model.to(device)
         wandb.watch(model, log="all", log_freq=100)
 
-        # 加载ViT预训练权重
+        
         from utils4train.weights import load_pretrained_weights
         pretrained_path = config.get("pretrained_weights", None)
         fusion_strategy = config.get("fusion_strategy", "interpolate")
@@ -230,7 +230,7 @@ def main():
                 encoder_name='transformer_encoder'
             )
 
-        # 计算并记录模型参数量
+        
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         wandb.config.update(
@@ -241,7 +241,7 @@ def main():
             }
         )
 
-        # 优化器和学习率调度器
+        
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config["learning_rate"],
@@ -265,16 +265,16 @@ def main():
         )
         scaler = GradScaler(init_scale=2.**16, enabled=(device.type == 'cuda'))
 
-        # 初始化评价指标
+        
         train_metrics = SegmentationMetrics(config["num_classes"])
         val_metrics = SegmentationMetrics(config["num_classes"])
         test_metrics = SegmentationMetrics(config["num_classes"])
 
-        # 创建检查点目录
+        
         checkpoint_dir = os.path.join("./checkpoints", experiment_name)
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-        # 本地日志配置
+        
         local_log_path = os.path.join(checkpoint_dir, "train_log.txt")
         logging.basicConfig(
             level=logging.INFO,
@@ -302,7 +302,7 @@ def main():
             )
         )
 
-        # 训练循环
+        
         best_iou, report_iou = 0.0, 0.0
         best_epoch = -1
         best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
@@ -319,7 +319,7 @@ def main():
 
             scheduler.step()
 
-            # 使用 wandb.log 记录训练和验证指标
+            
             wandb.log(
                 {   
                     "Comparison Board/IoU": val_result["iou"],
@@ -349,7 +349,7 @@ def main():
                 f"lr: {optimizer.param_groups[0]['lr']:.6g}"
             )
 
-            # 每10个epoch保存一次可视化结果
+            
             if (epoch + 1) % 10 == 0:
                 figure = create_sample_images(model, vis_loader, device, epoch + 1, num_samples=len(vis_loader))
                 if figure:
