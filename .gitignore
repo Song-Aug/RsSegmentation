@@ -6,7 +6,6 @@
 /wandb
 /.venv
 /logs
-/infer
 
 **/nohup.out
 
