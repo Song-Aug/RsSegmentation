@@ -6,6 +6,7 @@
 /wandb
 /.venv
 /logs
+/runs
 
 **/nohup.out
 
