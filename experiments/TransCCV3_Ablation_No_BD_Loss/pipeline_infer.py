@@ -69,6 +69,10 @@ def load_model(model_path, device, config):
         "num_classes": config["num_classes"],
         "depth": config["depth"],
         "hdnet_base_channel": config["hdnet_base_channel"],
+        # 消融实验开关
+        "use_transformer": config.get("use_transformer", True),
+        "use_cnn": config.get("use_cnn", True),
+        "use_cbam": config.get("use_cbam", True),
     })
 
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
