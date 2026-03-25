@@ -34,7 +34,7 @@ def load_model(model_path, device, config):
 
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)
     model.to(device).eval()
 
     return model
