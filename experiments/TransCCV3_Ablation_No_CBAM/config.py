@@ -1,7 +1,7 @@
 """
-TransCCV3 实验配置
+TransCCV3 消融实验: 无 CBAM 注意力模块
 
-集中管理所有实验超参数和路径配置，确保实验可复现。
+验证 CBAM 注意力融合机制的有效性
 """
 
 config = {
@@ -18,7 +18,7 @@ config = {
     "use_nir": False,
 
     # ========== 模型配置 ==========
-    "model_name": "TransCC_V3",
+    "model_name": "TransCCV3_Ablation_No_CBAM",
     "num_classes": 2,
     "patch_size": 16,
     "embed_dim": 768,
@@ -27,7 +27,7 @@ config = {
     "hdnet_base_channel": 48,
 
     # ========== 预训练权重 ==========
-    "pretrained_weights": "./pretrained_weights/vit_base_patch16_224.pth",
+    "pretrained_weights": None,  # 消融实验不加载预训练
     "fusion_strategy": "interpolate",
 
     # ========== 正则化 ==========
@@ -45,15 +45,17 @@ config = {
 
     # ========== 损失函数配置 ==========
     "seg_weight": 1.0,
-    "boundary_weight": 1.0,  # Full 模式 = 1.0（消融时设为 0）
+    "boundary_weight": 1.0,
     "aux_weight": 0.4,
     "dice_focal_ratio": 0.5,
     "bce_dice_ratio": 0.5,
 
-    # ========== 编码器开关（消融实验用）==========
-    "use_transformer": True,  # Full 模式 = True
-    "use_cnn": True,  # Full 模式 = True
-    "use_cbam": True,  # Full 模式 = True
+    # ========== 编码器开关 ==========
+    "use_transformer": True,
+    "use_cnn": True,
+
+    # ========== CBAM 开关（消融实验）==========
+    "use_cbam": False,  # 关闭 CBAM
 
     # ========== 输出配置 ==========
     "save_dir": "./runs",

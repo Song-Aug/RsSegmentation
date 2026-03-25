@@ -214,11 +214,15 @@ class CBAM(nn.Module):
 
 
 class CBAMResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1):
+    def __init__(self, in_channels, out_channels, stride=1, use_cbam=True):
         super(CBAMResidualBlock, self).__init__()
         self.conv1 = ConvBlock(in_channels, out_channels, kernel_size=3, stride=stride)
         self.conv2 = nn.Sequential(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False), nn.BatchNorm2d(out_channels))
-        self.cbam = CBAM(out_channels)
+        self.use_cbam = use_cbam
+        if use_cbam:
+            self.cbam = CBAM(out_channels)
+        else:
+            self.cbam = nn.Identity()
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False), nn.BatchNorm2d(out_channels))
@@ -231,11 +235,15 @@ class CBAMResidualBlock(nn.Module):
 
 class FeatureAggregator(nn.Module):
     """多尺度特征聚合模块"""
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, use_cbam=True):
         super(FeatureAggregator, self).__init__()
         self.conv1x1 = ConvBlock(in_channels, out_channels, kernel_size=1, padding=0)
         self.conv3x3 = ConvBlock(out_channels, out_channels, kernel_size=3, padding=1)
-        self.attention = CBAM(out_channels)
+        self.use_cbam = use_cbam
+        if use_cbam:
+            self.attention = CBAM(out_channels)
+        else:
+            self.attention = nn.Identity()
 
     def forward(self, x):
         x = self.conv1x1(x)
@@ -398,12 +406,16 @@ class CNNEncoder(nn.Module):
 
 class CNNSkipConnection(nn.Module):
     """跳级连接模块，用于融合 CNN 局部特征和 Decoder 特征"""
-    def __init__(self, cnn_channels, decoder_channels, out_channels):
+    def __init__(self, cnn_channels, decoder_channels, out_channels, use_cbam=True):
         super(CNNSkipConnection, self).__init__()
         self.cnn_proj = ConvBlock(cnn_channels, out_channels, kernel_size=1, padding=0)
         self.decoder_proj = ConvBlock(decoder_channels, out_channels, kernel_size=1, padding=0)
         self.fusion_conv = ConvBlock(out_channels * 2, out_channels, kernel_size=3, padding=1)
-        self.attention = CBAM(out_channels)
+        self.use_cbam = use_cbam
+        if use_cbam:
+            self.attention = CBAM(out_channels)
+        else:
+            self.attention = nn.Identity()
 
     def forward(self, cnn_feat, decoder_feat):
         if cnn_feat.shape[2:] != decoder_feat.shape[2:]:
@@ -419,10 +431,12 @@ class HybridDecoder(nn.Module):
     """混合解码器，主干由Transformer驱动，跳层由CNN驱动"""
     def __init__(self, embed_dim: int = 768, img_size: int = 512, num_classes: int = 2,
                  decoder_channels: List[int] = [512, 256, 128, 64],
-                 cnn_skip_channels: List[int] = [192, 96, 48]):
+                 cnn_skip_channels: List[int] = [192, 96, 48],
+                 use_cbam: bool = True):
         super().__init__()
         self.img_size = img_size
         self.decoder_channels = decoder_channels
+        self.use_cbam = use_cbam
 
         self.feature_proj = nn.Sequential(
             nn.Linear(embed_dim, decoder_channels[0]),
@@ -438,21 +452,21 @@ class HybridDecoder(nn.Module):
         ])
 
         self.cbam_blocks = nn.ModuleList([
-            CBAMResidualBlock(decoder_channels[0], decoder_channels[0]),
-            CBAMResidualBlock(decoder_channels[1], decoder_channels[1]),
-            CBAMResidualBlock(decoder_channels[2], decoder_channels[2])
+            CBAMResidualBlock(decoder_channels[0], decoder_channels[0], use_cbam=use_cbam),
+            CBAMResidualBlock(decoder_channels[1], decoder_channels[1], use_cbam=use_cbam),
+            CBAMResidualBlock(decoder_channels[2], decoder_channels[2], use_cbam=use_cbam)
         ])
 
         self.skip_connections = nn.ModuleList([
-            CNNSkipConnection(cnn_skip_channels[0], decoder_channels[1], decoder_channels[1]),
-            CNNSkipConnection(cnn_skip_channels[1], decoder_channels[2], decoder_channels[2]),
-            CNNSkipConnection(cnn_skip_channels[2], decoder_channels[3], decoder_channels[3])
+            CNNSkipConnection(cnn_skip_channels[0], decoder_channels[1], decoder_channels[1], use_cbam=use_cbam),
+            CNNSkipConnection(cnn_skip_channels[1], decoder_channels[2], decoder_channels[2], use_cbam=use_cbam),
+            CNNSkipConnection(cnn_skip_channels[2], decoder_channels[3], decoder_channels[3], use_cbam=use_cbam)
         ])
 
         self.feature_aggregators = nn.ModuleList([
-            FeatureAggregator(decoder_channels[1], decoder_channels[1]),
-            FeatureAggregator(decoder_channels[2], decoder_channels[2]),
-            FeatureAggregator(decoder_channels[3], decoder_channels[3])
+            FeatureAggregator(decoder_channels[1], decoder_channels[1], use_cbam=use_cbam),
+            FeatureAggregator(decoder_channels[2], decoder_channels[2], use_cbam=use_cbam),
+            FeatureAggregator(decoder_channels[3], decoder_channels[3], use_cbam=use_cbam)
         ])
 
         self.seg_head_stage1 = nn.Sequential(ConvBlock(decoder_channels[1], decoder_channels[1] // 2), nn.Conv2d(decoder_channels[1] // 2, num_classes, 1))
@@ -460,12 +474,22 @@ class HybridDecoder(nn.Module):
         self.final_proj = ASPP(decoder_channels[3], decoder_channels[3] // 2)
         self.seg_head_main = nn.Conv2d(decoder_channels[3] // 2, num_classes, 1)
         self.boundary_head_aux = nn.Sequential(ConvBlock(decoder_channels[2], decoder_channels[2] // 2), nn.Conv2d(decoder_channels[2] // 2, 1, 1))
-        self.boundary_head_main = nn.Sequential(
-            ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4, kernel_size=3),
-            CBAM(decoder_channels[3] // 4),
-            ConvBlock(decoder_channels[3] // 4, decoder_channels[3] // 8, kernel_size=3),
-            nn.Conv2d(decoder_channels[3] // 8, 1, 1)
-        )
+
+        # boundary_head_main 中的 CBAM
+        if use_cbam:
+            self.boundary_head_main = nn.Sequential(
+                ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4, kernel_size=3),
+                CBAM(decoder_channels[3] // 4),
+                ConvBlock(decoder_channels[3] // 4, decoder_channels[3] // 8, kernel_size=3),
+                nn.Conv2d(decoder_channels[3] // 8, 1, 1)
+            )
+        else:
+            self.boundary_head_main = nn.Sequential(
+                ConvBlock(decoder_channels[3] // 2, decoder_channels[3] // 4, kernel_size=3),
+                ConvBlock(decoder_channels[3] // 4, decoder_channels[3] // 8, kernel_size=3),
+                nn.Conv2d(decoder_channels[3] // 8, 1, 1)
+            )
+
         self.dropout = nn.Dropout(p=0.1)
         self._init_weights()
 
@@ -526,6 +550,7 @@ class TransCCV3(nn.Module):
     支持消融实验开关:
     - use_transformer: 是否使用 Transformer 编码器
     - use_cnn: 是否使用 CNN 编码器
+    - use_cbam: 是否使用 CBAM 注意力模块
     """
     def __init__(self, img_size: int = 512, patch_size: int = 16, in_chans: int = 3, num_classes: int = 2,
                  embed_dim: int = 768, depth: int = 6, num_heads: int = 12, mlp_ratio: float = 4.0,
@@ -534,11 +559,13 @@ class TransCCV3(nn.Module):
                  decoder_channels: List[int] = [512, 256, 128, 64],
                  hdnet_base_channel: int = 48,
                  use_transformer: bool = True,
-                 use_cnn: bool = True):
+                 use_cnn: bool = True,
+                 use_cbam: bool = True):
         super().__init__()
 
         self.use_transformer = use_transformer
         self.use_cnn = use_cnn
+        self.use_cbam = use_cbam
 
         # Transformer 编码器
         if use_transformer:
@@ -562,7 +589,7 @@ class TransCCV3(nn.Module):
             cnn_skip_channels = [hdnet_base_channel * 4, hdnet_base_channel * 2, hdnet_base_channel]  # 占位，实际不使用
 
         self.decoder = HybridDecoder(
-            embed_dim, img_size, num_classes, decoder_channels, cnn_skip_channels
+            embed_dim, img_size, num_classes, decoder_channels, cnn_skip_channels, use_cbam
         )
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
@@ -599,7 +626,7 @@ def create_transcc_v3(config: Optional[dict] = None) -> TransCCV3:
             'depth': 6, 'num_heads': 12, 'mlp_ratio': 4.0, 'qkv_bias': True, 'drop_rate': 0.0,
             'attn_drop_rate': 0.0, 'drop_path_rate': 0.1, 'decoder_channels': [512, 256, 128, 64],
             'use_fourier_pos': True, 'hdnet_base_channel': 48,
-            'use_transformer': True, 'use_cnn': True,
+            'use_transformer': True, 'use_cnn': True, 'use_cbam': True,
         }
     return TransCCV3(**config)
 
